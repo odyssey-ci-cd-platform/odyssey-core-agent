@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package odyssey.v1;
+
+option go_package = "codeberg.org/odyssey/odyssey-core-agent/gen/proto/v1;odysseyv1";
+
+// Status represents the status of any pipeline entity.
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_PENDING = 1;
+  STATUS_RUNNING = 2;
+  STATUS_PASSED = 3;
+  STATUS_FAILED = 4;
+  STATUS_SKIPPED = 5;
+  STATUS_ERRORED = 7;
+}
+
+// RunPipelineRequest is sent by the client to trigger a pipeline run.
+message RunPipelineRequest {
+  // Absolute or relative path to the directory containing .odyssey/
+  string project_path = 1;
+}
+
+// RunPipelineResponse is returned once the pipeline has finished.
+message RunPipelineResponse {
+  string pipeline_name = 1;
+  Status status = 2;
+  repeated StageResult stage_results = 3;
+}
+
+message StageResult {
+  string stage_name = 1;
+  Status status = 2;
+  repeated JobResult job_results = 3;
+}
+
+message JobResult {
+  string job_name = 1;
+  Status status = 2;
+  repeated StepResult step_results = 3;
+}
+
+message StepResult {
+  string step_name = 1;
+  string output = 2;
+  int32 exit_code = 3;
+  Status status = 4;
+}
+
+// OdysseyService is the core daemon service.
+service OdysseyService {
+  // RunPipeline executes a pipeline and returns the full result when done.
+  rpc RunPipeline(RunPipelineRequest) returns (RunPipelineResponse);
+}

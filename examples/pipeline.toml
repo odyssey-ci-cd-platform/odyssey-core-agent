@@ -1,0 +1,104 @@
+# =============================================================================
+# Odyssey Example Pipeline Configuration
+# =============================================================================
+# This file lives at <project-root>/.odyssey/pipeline.toml and defines your
+# CI/CD pipeline. Stages run in order; all jobs within a stage run concurrently.
+
+# ---------------------------------------------------------------------------
+# [pipeline] — required
+# ---------------------------------------------------------------------------
+# name:    A human-readable name for the pipeline.
+# stages:  Ordered list of stage names. Stages execute sequentially. Jobs
+#          within the same stage run in parallel.
+# ---------------------------------------------------------------------------
+[pipeline]
+name = "example-ci"
+stages = ["build", "test", "deploy"]
+
+# ---------------------------------------------------------------------------
+# [jobs.<id>] — at least one required
+# ---------------------------------------------------------------------------
+# Each job is keyed by a unique identifier (e.g. "compile", "unit-tests").
+#
+# Fields:
+#   name     (string, required)   — Human-readable job name.
+#   stage    (string, required)   — Which stage this job belongs to. Must match
+#                                   a name declared in pipeline.stages.
+#   image    (string, required)   — Docker image to run the job in.
+#   setup    ([]string, optional) — Shell commands run before steps. Useful for
+#                                   installing dependencies. State persists
+#                                   across steps within the same job.
+#   env      ({string:string}, optional) — Environment variables injected into
+#                                   the container. Merged with globals from
+#                                   .odyssey/env.toml; job-level values take
+#                                   precedence.
+#   steps    ([]step, required)   — Ordered list of steps to execute. At least
+#                                   one step is required.
+#
+# Each step has:
+#   name     (string, required)   — A label for the step.
+#   run      (string, required)   — Shell command to execute.
+# ---------------------------------------------------------------------------
+
+# --- Build stage: two jobs run in parallel ---
+
+[jobs.compile]
+stage = "build"
+image = "golang:1.22"
+setup = [
+    "go mod download",
+    "mkdir -p /app/dist",
+]
+env = { GOOS = "linux", GOARCH = "amd64", CGO_ENABLED = "0" }
+steps = [
+    { name = "build binary",      run = "go build -o /app/dist/server ./cmd/server" },
+    { name = "check binary size", run = "ls -lh /app/dist/server" },
+]
+
+[jobs.lint]
+stage = "build"
+image = "golangci/golangci-lint:v1.59"
+steps = [
+    { name = "run linter", run = "golangci-lint run ./..." },
+]
+
+# --- Test stage: two jobs run in parallel ---
+
+[jobs.unit-tests]
+stage = "test"
+image = "golang:1.22"
+setup = ["go mod download"]
+env = { DB_HOST = "localhost", DB_PORT = "5432", LOG_LEVEL = "debug" }
+steps = [
+    { name = "unit tests",    run = "go test -v -count=1 ./..." },
+    { name = "race detector", run = "go test -race -count=1 ./..." },
+    { name = "coverage",      run = "go test -coverprofile=/app/coverage.out ./..." },
+]
+
+[jobs.integration-tests]
+stage = "test"
+image = "golang:1.22"
+setup = [
+    "go mod download",
+    "apt-get update && apt-get install -y curl",
+]
+env = { DB_HOST = "postgres", DB_PORT = "5432", API_URL = "http://localhost:8080" }
+steps = [
+    { name = "integration tests", run = "go test -v -tags=integration ./..." },
+]
+
+# --- Deploy stage: one job ---
+
+[jobs.deploy-staging]
+name = "deploy-staging"
+stage = "deploy"
+image = "alpine:latest"
+setup = [
+    "apk add --no-cache curl jq",
+]
+env = { ENVIRONMENT = "staging", DEPLOY_TOKEN = "" }
+steps = [
+    { name = "verify artifacts", run = "echo 'Artifacts verified'" },
+    { name = "deploy",           run = "echo 'Deploying to staging...'" },
+    { name = "smoke test",       run = "curl -sf http://staging.example.com/health" },
+]

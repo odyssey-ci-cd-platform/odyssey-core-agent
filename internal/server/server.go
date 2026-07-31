@@ -4,10 +4,10 @@ import (
 	"context"
 	"log/slog"
 
-	odysseyv1 "codeberg.org/odyssey/odyssey-core-agent/gen/proto/v1"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/config"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/orchestrator"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/runner"
+	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/config"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/orchestrator"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/runner"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

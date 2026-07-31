@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	odysseyv1 "codeberg.org/odyssey/odyssey-core-agent/gen/proto/v1"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/domain"
+	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"

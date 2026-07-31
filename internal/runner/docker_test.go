@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/odyssey/odyssey-core-agent/internal/domain"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/runner"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/runner"
 )
 
 func TestNewDockerRunner(t *testing.T) {

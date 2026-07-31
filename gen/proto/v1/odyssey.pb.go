@@ -415,7 +415,7 @@ const file_odyssey_proto_rawDesc = "" +
 	"\x0eSTATUS_SKIPPED\x10\x05\x12\x12\n" +
 	"\x0eSTATUS_ERRORED\x10\a2`\n" +
 	"\x0eOdysseyService\x12N\n" +
-	"\vRunPipeline\x12\x1e.odyssey.v1.RunPipelineRequest\x1a\x1f.odyssey.v1.RunPipelineResponseB@Z>codeberg.org/odyssey/odyssey-core-agent/gen/proto/v1;odysseyv1b\x06proto3"
+	"\vRunPipeline\x12\x1e.odyssey.v1.RunPipelineRequest\x1a\x1f.odyssey.v1.RunPipelineResponseBDZBbitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1;odysseyv1b\x06proto3"
 
 var (
 	file_odyssey_proto_rawDescOnce sync.Once

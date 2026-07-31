@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"codeberg.org/odyssey/odyssey-core-agent/internal/config"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/domain"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/config"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 )
 
 // writeOdysseyConfig creates a .odyssey directory under dir, writes

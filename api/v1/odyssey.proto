@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package odyssey.v1;
 
-option go_package = "codeberg.org/odyssey/odyssey-core-agent/gen/proto/v1;odysseyv1";
+option go_package = "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1;odysseyv1";
 
 // Status represents the status of any pipeline entity.
 enum Status {

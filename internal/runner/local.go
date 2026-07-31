@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"codeberg.org/odyssey/odyssey-core-agent/internal/domain"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 )
 
 // LocalRunner executes jobs on the local machine without a container.

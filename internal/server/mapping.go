@@ -3,8 +3,8 @@ package server
 import (
 	"fmt"
 
-	odysseyv1 "codeberg.org/odyssey/odyssey-core-agent/gen/proto/v1"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/domain"
+	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 )
 
 // domainStatusToProto maps a domain.Status slug to the corresponding

@@ -3,7 +3,7 @@ package runner
 import (
 	"context"
 
-	"codeberg.org/odyssey/odyssey-core-agent/internal/domain"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 )
 
 type Runner interface {

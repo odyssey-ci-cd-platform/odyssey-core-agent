@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"time"
 
-	"codeberg.org/odyssey/odyssey-core-agent/internal/common"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/domain"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/common"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"

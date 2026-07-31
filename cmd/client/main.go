@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	odysseyv1 "codeberg.org/odyssey/odyssey-core-agent/gen/proto/v1"
+	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
 )
 
 func main() {

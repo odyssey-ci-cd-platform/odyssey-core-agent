@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"codeberg.org/odyssey/odyssey-core-agent/internal/common"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/domain"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/common"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 )
 
 const (

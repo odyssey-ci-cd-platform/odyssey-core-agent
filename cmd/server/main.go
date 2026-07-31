@@ -11,8 +11,8 @@ import (
 	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 
-	odysseyv1 "codeberg.org/odyssey/odyssey-core-agent/gen/proto/v1"
-	"codeberg.org/odyssey/odyssey-core-agent/internal/server"
+	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/server"
 )
 
 func main() {

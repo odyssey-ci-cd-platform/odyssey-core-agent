@@ -1,4 +1,4 @@
-module codeberg.org/odyssey/odyssey-core-agent
+module bitbucket.org/odyssey-ci/odyssey-core-agent
 
 go 1.26.4
 

@@ -120,10 +120,12 @@ func (r *DockerRunner) pullImage(ctx context.Context, img string) error {
 // createContainer creates a container for the job without starting it.
 // It also mounts the projectPath to the container.
 func (r *DockerRunner) createContainer(ctx context.Context, job domain.Job, projectPath string) (string, error) {
-	env := make([]string, 0, len(job.Env))
+	env := make([]string, 0, len(job.Env)+1)
 	for k, v := range job.Env {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
+	// Expose the env-file path so steps can export vars to later steps.
+	env = append(env, fmt.Sprintf("%s=%s", envFileVar, envFilePath))
 
 	resp, err := r.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
@@ -162,7 +164,7 @@ func (r *DockerRunner) removeContainer(ctx context.Context, containerID string) 
 // runSetup runs setup command for the Job.
 func (r *DockerRunner) runSetup(ctx context.Context, containerID string, setupCmd []string) error {
 	for _, command := range setupCmd {
-		if _, _, _, err := r.execCommand(ctx, containerID, command); err != nil {
+		if _, _, _, err := r.execCommand(ctx, containerID, command, nil); err != nil {
 			return err
 		}
 	}
@@ -172,9 +174,22 @@ func (r *DockerRunner) runSetup(ctx context.Context, containerID string, setupCm
 func (r *DockerRunner) runSteps(ctx context.Context, containerID string, steps []domain.Step) ([]domain.StepResult, error) {
 	stepResults := make([]domain.StepResult, 0, len(steps))
 
+	// Start each job with an empty env file so a step can append to it and
+	// later steps can read it back, even if no earlier step wrote anything.
+	if _, _, _, err := r.execCommand(ctx, containerID, ": > "+envFilePath, nil); err != nil {
+		return stepResults, fmt.Errorf("failed to initialize env file: %w", err)
+	}
+
 	for _, step := range steps {
+		// Vars exported by earlier steps, injected as this exec's env. Exec env
+		// overrides the container's job-level env.
+		exported, err := r.readExportedEnv(ctx, containerID)
+		if err != nil {
+			return stepResults, fmt.Errorf("failed to read exported env before step %q: %w", step.Name, err)
+		}
+
 		stepStartTime := time.Now()
-		exitCode, stdout, stderr, err := r.execCommand(ctx, containerID, step.Run)
+		exitCode, stdout, stderr, runErr := r.execCommand(ctx, containerID, step.Run, envSlice(exported))
 		stepResults = append(stepResults, domain.StepResult{
 			StepName: step.Name,
 			Stdout:   stdout,
@@ -183,18 +198,39 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, steps [
 			Duration: time.Since(stepStartTime),
 		})
 
+		if runErr != nil {
+			return stepResults, runErr
+		}
+
+		// Surface which vars this step exported for later steps. Values are
+		// omitted since they may hold secrets; a future UI can show them.
+		after, err := r.readExportedEnv(ctx, containerID)
 		if err != nil {
-			return stepResults, err
+			return stepResults, fmt.Errorf("failed to read exported env after step %q: %w", step.Name, err)
+		}
+		if keys := newlyExportedKeys(exported, after); len(keys) > 0 {
+			r.loggerFromCtx(ctx).Info("step exported env vars", "step", step.Name, "keys", keys)
 		}
 	}
 	return stepResults, nil
 }
 
+// readExportedEnv reads the in-container env file and parses its KEY=value
+// lines into a map. See parseEnvFile for the parsing rules.
+func (r *DockerRunner) readExportedEnv(ctx context.Context, containerID string) (map[string]string, error) {
+	_, stdout, _, err := r.execCommand(ctx, containerID, "cat "+envFilePath, nil)
+	if err != nil {
+		return nil, err
+	}
+	return parseEnvFile(stdout), nil
+}
+
 // execCommand runs a command inside a container and returns its exit code,
 // stdout, stderr, and an error.
-func (r *DockerRunner) execCommand(ctx context.Context, containerID string, command string) (domain.ExitCode, string, string, error) {
+func (r *DockerRunner) execCommand(ctx context.Context, containerID string, command string, env []string) (domain.ExitCode, string, string, error) {
 	execConfig := client.ExecCreateOptions{
 		Cmd:          []string{"sh", "-c", command},
+		Env:          env,
 		AttachStdout: true,
 		AttachStderr: true,
 	}

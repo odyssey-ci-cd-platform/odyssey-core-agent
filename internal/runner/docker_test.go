@@ -215,6 +215,67 @@ func TestDockerRunnerRunMultipleSteps(t *testing.T) {
 	}
 }
 
+func TestDockerRunnerExportsEnvBetweenSteps(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "export-env-test",
+		Image: "alpine:latest",
+		Steps: []domain.Step{
+			{Name: "export", Run: `echo "SHARED=from-step-one" >> "$ODYSSEY_ENV"`},
+			{Name: "consume", Run: "echo $SHARED"},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := r.Run(ctx, job, dir)
+	if err != nil {
+		t.Fatalf("Run() unexpected error: %v", err)
+	}
+	if len(result.StepResults) != 2 {
+		t.Fatalf("expected 2 step results, got %d", len(result.StepResults))
+	}
+	if got := result.StepResults[1].Stdout; !strings.Contains(got, "from-step-one") {
+		t.Errorf("expected second step to see exported var, got %q", got)
+	}
+}
+
+func TestDockerRunnerExportedEnvOverridesJobEnv(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "override-env-test",
+		Image: "alpine:latest",
+		Env:   map[string]string{"SHARED": "job-level"},
+		Steps: []domain.Step{
+			{Name: "before override", Run: "echo $SHARED"},
+			{Name: "override", Run: `echo "SHARED=step-level" >> "$ODYSSEY_ENV"`},
+			{Name: "after override", Run: "echo $SHARED"},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := r.Run(ctx, job, dir)
+	if err != nil {
+		t.Fatalf("Run() unexpected error: %v", err)
+	}
+	if len(result.StepResults) != 3 {
+		t.Fatalf("expected 3 step results, got %d", len(result.StepResults))
+	}
+	if got := result.StepResults[0].Stdout; !strings.Contains(got, "job-level") {
+		t.Errorf("first step: expected job-level value, got %q", got)
+	}
+	if got := result.StepResults[2].Stdout; !strings.Contains(got, "step-level") {
+		t.Errorf("last step: expected exported value to override job env, got %q", got)
+	}
+}
+
 func TestDockerRunnerRunSetupError(t *testing.T) {
 	r := requireDocker(t)
 	dir := t.TempDir()

@@ -9,6 +9,7 @@ import (
 type StepConfig struct {
 	Name string `toml:"name"`
 	Run  string `toml:"run"`
+	Timeout int `toml:"timeout"`
 }
 
 // JobConfig represents a job as defined in pipeline.toml.

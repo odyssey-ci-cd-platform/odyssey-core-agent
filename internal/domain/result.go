@@ -20,11 +20,6 @@ func (r StepResult) Status() Status {
 }
 
 // JobResult holds the results of all steps within a job.
-//
-// SetupErr is set when the job's setup commands (or earlier infra steps like
-// image pull / container creation) failed before any step could run. When
-// SetupErr is non-nil, StepResults will be empty and Status() reports
-// StatusErrored.
 type JobResult struct {
 	JobName     string
 	StepResults []StepResult

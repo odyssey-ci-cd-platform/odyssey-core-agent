@@ -68,4 +68,3 @@ func (s Server) RunPipeline(ctx context.Context, request *odysseyv1.RunPipelineR
 	)
 	return &response, nil
 }
-

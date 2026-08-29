@@ -47,6 +47,14 @@ func TestJobResultStatus(t *testing.T) {
 			want: domain.StatusErrored,
 		},
 		{
+			name: "setup error wins even when steps present",
+			r: domain.JobResult{
+				SetupErr:    errors.New("image pull failed"),
+				StepResults: []domain.StepResult{{ExitCode: domain.ExitSuccess}},
+			},
+			want: domain.StatusErrored,
+		},
+		{
 			name: "no steps and no error returns pending",
 			r:    domain.JobResult{},
 			want: domain.StatusPending,
@@ -185,6 +193,16 @@ func TestStageResultStatus(t *testing.T) {
 			},
 			want: domain.StatusErrored,
 		},
+		{
+			name: "pending beats passed",
+			r: domain.StageResult{
+				JobResults: []domain.JobResult{
+					{StepResults: []domain.StepResult{{ExitCode: domain.ExitSuccess}}},
+					{}, // empty job result → Pending
+				},
+			},
+			want: domain.StatusPending,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -290,6 +308,16 @@ func TestPipelineResultStatus(t *testing.T) {
 				},
 			},
 			want: domain.StatusErrored,
+		},
+		{
+			name: "pending beats passed",
+			r: domain.PipelineResult{
+				StageResults: []domain.StageResult{
+					{JobResults: []domain.JobResult{{StepResults: []domain.StepResult{{ExitCode: domain.ExitSuccess}}}}},
+					{}, // empty stage result → Pending
+				},
+			},
+			want: domain.StatusPending,
 		},
 	}
 	for _, tt := range tests {

@@ -56,10 +56,13 @@ func CreateTar(path string) ([]byte, error) {
 			if err != nil {
 				return err
 			}
-			defer f.Close()
-
-			if _, err := io.Copy(tw, f); err != nil {
+			_, err = io.Copy(tw, f)
+			closeErr := f.Close()
+			if err != nil {
 				return err
+			}
+			if closeErr != nil {
+				return closeErr
 			}
 		}
 		return nil

@@ -7,9 +7,9 @@ import (
 
 // StepConfig represents a single step in a job as defined in pipeline.toml.
 type StepConfig struct {
-	Name string `toml:"name"`
-	Run  string `toml:"run"`
-	Timeout int `toml:"timeout"`
+	Name    string `toml:"name"`
+	Run     string `toml:"run"`
+	Timeout int    `toml:"timeout"`
 }
 
 // JobConfig represents a job as defined in pipeline.toml.
@@ -57,7 +57,7 @@ func (root RootConfig) Validate() error {
 
 	// Job-level checks
 	if len(root.Jobs) == 0 {
-		errs = append(errs, errors.New("pipeline must define at lease one job"))
+		errs = append(errs, errors.New("pipeline must define at least one job"))
 	}
 
 	for jobName, job := range root.Jobs {
@@ -70,7 +70,7 @@ func (root RootConfig) Validate() error {
 			errs = append(errs, fmt.Errorf("job %q: image must not be empty", jobName))
 		}
 		if len(job.Steps) == 0 {
-			errs = append(errs, fmt.Errorf("job %q: must define at lease one step", jobName))
+			errs = append(errs, fmt.Errorf("job %q: must define at least one step", jobName))
 		}
 		for stepNumber, step := range job.Steps {
 			if step.Name == "" {

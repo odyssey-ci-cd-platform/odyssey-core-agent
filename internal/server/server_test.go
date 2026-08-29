@@ -19,10 +19,6 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-// ---------------------------------------------------------------------------
-// fake runner
-// ---------------------------------------------------------------------------
-
 // fakeRunner returns pre-configured results keyed by job name.
 type fakeRunner struct {
 	results map[string]domain.JobResult
@@ -38,10 +34,6 @@ func (f *fakeRunner) Run(_ context.Context, job domain.Job, _ string) (domain.Jo
 	f.mu.Unlock()
 	return f.results[job.Name], f.errs[job.Name]
 }
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
 
 func newPassedJob(name string) domain.JobResult {
 	return domain.JobResult{
@@ -68,10 +60,6 @@ func newErroredJob(name string) domain.JobResult {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// domainStatusToProto
-// ---------------------------------------------------------------------------
-
 func TestDomainStatusToProto(t *testing.T) {
 	tests := []struct {
 		name string
@@ -95,10 +83,6 @@ func TestDomainStatusToProto(t *testing.T) {
 		})
 	}
 }
-
-// ---------------------------------------------------------------------------
-// domainStepResultToProto
-// ---------------------------------------------------------------------------
 
 func TestDomainStepResultToProto(t *testing.T) {
 	tests := []struct {
@@ -155,10 +139,6 @@ func TestDomainStepResultToProto(t *testing.T) {
 		})
 	}
 }
-
-// ---------------------------------------------------------------------------
-// domainJobResultToProto
-// ---------------------------------------------------------------------------
 
 func TestDomainJobResultToProto(t *testing.T) {
 	passedStep := domain.StepResult{StepName: "s", Stdout: "ok", ExitCode: domain.ExitSuccess}
@@ -222,10 +202,6 @@ func TestDomainJobResultToProto(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// domainStageResultToProto
-// ---------------------------------------------------------------------------
-
 func TestDomainStageResultToProto(t *testing.T) {
 	t.Run("empty stage returns pending", func(t *testing.T) {
 		r := domain.StageResult{StageName: "empty-stage"}
@@ -274,10 +250,6 @@ func TestDomainStageResultToProto(t *testing.T) {
 		}
 	})
 }
-
-// ---------------------------------------------------------------------------
-// domainPipelineResultToProto
-// ---------------------------------------------------------------------------
 
 func TestDomainPipelineResultToProto(t *testing.T) {
 	t.Run("empty pipeline returns pending", func(t *testing.T) {
@@ -333,10 +305,6 @@ func TestDomainPipelineResultToProto(t *testing.T) {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// server integration tests (bufconn)
-// ---------------------------------------------------------------------------
-
 const bufSize = 1024 * 1024
 
 // writeODysseyConfig writes a minimal .odyssey/pipeline.toml to dir.
@@ -368,11 +336,9 @@ func bufDialer(lis *bufconn.Listener) func(context.Context, string) (net.Conn, e
 }
 
 func TestServerRunPipeline_Success(t *testing.T) {
-	// Set up a project directory with a minimal .odyssey/ config.
 	dir := t.TempDir()
 	writeODysseyConfig(t, dir)
 
-	// Fake runner that returns a passed job.
 	fake := &fakeRunner{
 		results: map[string]domain.JobResult{
 			"test-job": newPassedJob("test-job"),
@@ -380,7 +346,6 @@ func TestServerRunPipeline_Success(t *testing.T) {
 		errs: map[string]error{},
 	}
 
-	// Set up bufconn and gRPC server.
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
 	odysseyv1.RegisterOdysseyServiceServer(srv, &Server{Runner: fake})
@@ -391,7 +356,6 @@ func TestServerRunPipeline_Success(t *testing.T) {
 	}()
 	t.Cleanup(srv.Stop)
 
-	// Dial the bufconn listener.
 	ctx := context.Background()
 	conn, err := grpc.NewClient("passthrough:///bufnet",
 		grpc.WithContextDialer(bufDialer(lis)),
@@ -453,5 +417,41 @@ func TestServerRunPipeline_InvalidPath(t *testing.T) {
 	}
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("gRPC code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
+func TestServerRunPipeline_RunnerCreationFails(t *testing.T) {
+	dir := t.TempDir()
+	writeODysseyConfig(t, dir)
+
+	// No "://" in DOCKER_HOST makes NewDockerRunner fail at construction,
+	// exercising the codes.Internal path in RunPipeline.
+	t.Setenv("DOCKER_HOST", "invalid-host")
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer()
+	odysseyv1.RegisterOdysseyServiceServer(srv, &Server{})
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	ctx := context.Background()
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(bufDialer(lis)),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial bufconn: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := odysseyv1.NewOdysseyServiceClient(conn)
+	_, err = client.RunPipeline(ctx, &odysseyv1.RunPipelineRequest{
+		ProjectPath: dir,
+	})
+	if err == nil {
+		t.Fatal("expected error when runner creation fails, got nil")
+	}
+	if status.Code(err) != codes.Internal {
+		t.Errorf("gRPC code = %v, want Internal", status.Code(err))
 	}
 }

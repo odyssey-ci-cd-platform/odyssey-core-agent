@@ -37,7 +37,7 @@ func TestLoad(t *testing.T) {
 		envTOML      string
 		want         domain.Pipeline
 		wantErr      bool
-		errContains  string
+		errContains  []string
 	}{
 		{
 			name: "valid minimal pipeline",
@@ -286,7 +286,7 @@ steps = [
 ]
 `),
 			wantErr:     true,
-			errContains: "at least one stage",
+			errContains: []string{"at least one stage"},
 		},
 		{
 			name: "duplicate stage names",
@@ -304,7 +304,7 @@ steps = [
 ]
 `),
 			wantErr:     true,
-			errContains: `duplicate stage name: "test"`,
+			errContains: []string{`duplicate stage name: "test"`},
 		},
 		{
 			name: "no jobs defined",
@@ -314,7 +314,7 @@ name = "ci"
 stages = ["test"]
 `),
 			wantErr:     true,
-			errContains: "at lease one job",
+			errContains: []string{"at least one job"},
 		},
 		{
 			name: "job references undeclared stage",
@@ -332,7 +332,7 @@ steps = [
 ]
 `),
 			wantErr:     true,
-			errContains: `stage "test" is not declared`,
+			errContains: []string{`stage "test" is not declared`},
 		},
 		{
 			name: "job with empty stage",
@@ -350,7 +350,7 @@ steps = [
 ]
 `),
 			wantErr:     true,
-			errContains: `stage must not be empty`,
+			errContains: []string{`stage must not be empty`},
 		},
 		{
 			name: "job with empty image",
@@ -368,7 +368,7 @@ steps = [
 ]
 `),
 			wantErr:     true,
-			errContains: `image must not be empty`,
+			errContains: []string{`image must not be empty`},
 		},
 		{
 			name: "job with no steps",
@@ -384,7 +384,7 @@ image = "alpine:latest"
 steps = []
 `),
 			wantErr:     true,
-			errContains: `must define at lease one step`,
+			errContains: []string{`must define at least one step`},
 		},
 		{
 			name: "step with empty name",
@@ -402,7 +402,7 @@ steps = [
 ]
 `),
 			wantErr:     true,
-			errContains: `name must not be empty`,
+			errContains: []string{`name must not be empty`},
 		},
 		{
 			name: "step with empty run command",
@@ -420,19 +420,37 @@ steps = [
 ]
 `),
 			wantErr:     true,
-			errContains: `run must not be empty`,
+			errContains: []string{`run must not be empty`},
 		},
 		{
 			name:         "missing pipeline.toml",
 			pipelineTOML: "",
 			wantErr:      true,
-			errContains:  "failed to read pipeline.toml",
+			errContains:  []string{"failed to read pipeline.toml"},
 		},
 		{
 			name:         "invalid TOML syntax",
 			pipelineTOML: `this is not valid toml {{{`,
 			wantErr:      true,
-			errContains:  "failed to read pipeline.toml",
+			errContains:  []string{"failed to read pipeline.toml"},
+		},
+		{
+			name: "malformed env.toml",
+			pipelineTOML: strings.TrimSpace(`
+[pipeline]
+name = "ci"
+stages = ["test"]
+
+[jobs.unit]
+stage = "test"
+image = "alpine:latest"
+steps = [
+  { name = "step", run = "echo hello" },
+]
+`),
+			envTOML:     "this is not valid toml {{{",
+			wantErr:     true,
+			errContains: []string{"failed to read env.toml"},
 		},
 		{
 			name: "multiple validation errors reported together",
@@ -448,7 +466,7 @@ image = ""
 steps = []
 `),
 			wantErr:     true,
-			errContains: "image must not be empty",
+			errContains: []string{"image must not be empty", "must define at least one step"},
 		},
 	}
 
@@ -467,8 +485,10 @@ steps = []
 					t.Errorf("Load() unexpected error: %v", err)
 					return
 				}
-				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("Load() error = %v, want error containing %q", err, tt.errContains)
+				for _, want := range tt.errContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("Load() error = %v, want error containing %q", err, want)
+					}
 				}
 				return
 			}

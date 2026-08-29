@@ -10,22 +10,22 @@ import (
 // domainStatusToProto maps a domain.Status slug to the corresponding
 // protobuf Status enum. Unknown or empty slugs produce STATUS_UNSPECIFIED.
 func domainStatusToProto(s domain.Status) odysseyv1.Status {
-    switch s.String() {
-    case "passed":
-        return odysseyv1.Status_STATUS_PASSED
-    case "failed":
-        return odysseyv1.Status_STATUS_FAILED
-    case "errored":
-        return odysseyv1.Status_STATUS_ERRORED
-    case "pending":
-        return odysseyv1.Status_STATUS_PENDING
-    case "running":
-        return odysseyv1.Status_STATUS_RUNNING
-    case "skipped":
-        return odysseyv1.Status_STATUS_SKIPPED
-    default:
-        return odysseyv1.Status_STATUS_UNSPECIFIED
-    }
+	switch s.String() {
+	case "passed":
+		return odysseyv1.Status_STATUS_PASSED
+	case "failed":
+		return odysseyv1.Status_STATUS_FAILED
+	case "errored":
+		return odysseyv1.Status_STATUS_ERRORED
+	case "pending":
+		return odysseyv1.Status_STATUS_PENDING
+	case "running":
+		return odysseyv1.Status_STATUS_RUNNING
+	case "skipped":
+		return odysseyv1.Status_STATUS_SKIPPED
+	default:
+		return odysseyv1.Status_STATUS_UNSPECIFIED
+	}
 }
 
 // domainStepResultToProto converts a single domain step result to its
@@ -37,9 +37,9 @@ func domainStepResultToProto(r domain.StepResult) *odysseyv1.StepResult {
 	}
 	return &odysseyv1.StepResult{
 		StepName: r.StepName,
-		Output: output,
+		Output:   output,
 		ExitCode: int32(r.ExitCode),
-		Status: domainStatusToProto(r.Status()),
+		Status:   domainStatusToProto(r.Status()),
 	}
 }
 
@@ -52,8 +52,8 @@ func domainJobResultToProto(r domain.JobResult) *odysseyv1.JobResult {
 		protoStepResults = append(protoStepResults, domainStepResultToProto(sr))
 	}
 	return &odysseyv1.JobResult{
-		JobName: r.JobName,
-		Status: domainStatusToProto(r.Status()),
+		JobName:     r.JobName,
+		Status:      domainStatusToProto(r.Status()),
 		StepResults: protoStepResults,
 	}
 }
@@ -65,9 +65,9 @@ func domainStageResultToProto(r domain.StageResult) *odysseyv1.StageResult {
 	for _, jr := range r.JobResults {
 		protoJobResults = append(protoJobResults, domainJobResultToProto(jr))
 	}
-	return &odysseyv1.StageResult {
-		StageName: r.StageName,
-		Status: domainStatusToProto(r.Status()),
+	return &odysseyv1.StageResult{
+		StageName:  r.StageName,
+		Status:     domainStatusToProto(r.Status()),
 		JobResults: protoJobResults,
 	}
 }
@@ -80,10 +80,9 @@ func domainPipelineResultToProto(r domain.PipelineResult) odysseyv1.RunPipelineR
 	for _, sr := range r.StageResults {
 		protoStageResults = append(protoStageResults, domainStageResultToProto(sr))
 	}
-	return odysseyv1.RunPipelineResponse {
+	return odysseyv1.RunPipelineResponse{
 		PipelineName: r.PipelineName,
-		Status: domainStatusToProto(r.Status()),
+		Status:       domainStatusToProto(r.Status()),
 		StageResults: protoStageResults,
 	}
 }
-

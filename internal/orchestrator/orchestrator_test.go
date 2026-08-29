@@ -27,8 +27,7 @@ func (f *fakeRunner) Run(_ context.Context, job domain.Job, _ string) (domain.Jo
 	return f.results[job.Name], f.errs[job.Name]
 }
 
-// blockingRunner blocks each Run() call until the test releases it.
-// Used to verify that jobs within a stage start concurrently.
+// blockingRunner blocks each Run() call until the test releases it, to verify that jobs within a stage start concurrently.
 type blockingRunner struct {
 	entered *sync.WaitGroup // signaled when Run() is entered
 	release <-chan struct{} // closed by the test to unblock
@@ -218,8 +217,6 @@ func TestOrchestratorMultipleStages(t *testing.T) {
 		}
 	}
 
-	// Verify the runner's call order: stages execute sequentially, so
-	// calls[0]="build", calls[1]="test", calls[2]="deploy".
 	r.mu.Lock()
 	calls := make([]string, len(r.calls))
 	copy(calls, r.calls)
@@ -272,7 +269,6 @@ func TestOrchestratorMixedStatuses(t *testing.T) {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}
 
-	// All three jobs ran even though one errored and one failed.
 	if len(result.StageResults[0].JobResults) != 3 {
 		t.Fatalf("expected 3 job results, got %d", len(result.StageResults[0].JobResults))
 	}
@@ -312,10 +308,7 @@ func TestOrchestratorEmptyPipeline(t *testing.T) {
 }
 
 func TestOrchestratorJobsRunConcurrently(t *testing.T) {
-	// Proves that jobs within a stage are launched concurrently, not
-	// sequentially.  Each Run() call signals entered.Done() then blocks
-	// on <-release.  The test waits for all three to enter, then closes
-	// release to let them all finish.
+	// Verifies jobs within a stage start concurrently, not sequentially.
 	var entered sync.WaitGroup
 	release := make(chan struct{})
 
@@ -353,7 +346,6 @@ func TestOrchestratorJobsRunConcurrently(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for all 3 jobs to enter Run().
 	waitDone := make(chan struct{})
 	go func() {
 		entered.Wait()
@@ -362,7 +354,6 @@ func TestOrchestratorJobsRunConcurrently(t *testing.T) {
 
 	select {
 	case <-waitDone:
-		// All three are inside Run() concurrently. Release them.
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for jobs to start — they may be running sequentially")
 	}
@@ -376,9 +367,7 @@ func TestOrchestratorJobsRunConcurrently(t *testing.T) {
 }
 
 func TestOrchestratorRunnerErrorDoesNotBlockOtherJobs(t *testing.T) {
-	// When one job's runner returns an error, sibling jobs must still run.
-	// The orchestrator surfaces errors through JobResult.Status(), not by
-	// aborting the stage.
+	// A job's runner error must not block sibling jobs in the stage.
 	r := &fakeRunner{
 		results: map[string]domain.JobResult{
 			"good": newPassedJob("good"),
@@ -414,7 +403,6 @@ func TestOrchestratorRunnerErrorDoesNotBlockOtherJobs(t *testing.T) {
 		t.Fatalf("expected 2 job results, got %d", len(jobs))
 	}
 
-	// The good job should still have passed.
 	foundGood := false
 	for _, jr := range jobs {
 		if jr.JobName == "good" && jr.Status() == domain.StatusPassed {
@@ -427,5 +415,7 @@ func TestOrchestratorRunnerErrorDoesNotBlockOtherJobs(t *testing.T) {
 }
 
 // Compile-time check that our fakes satisfy the Runner interface.
-var _ runner.Runner = (*fakeRunner)(nil)
-var _ runner.Runner = (*blockingRunner)(nil)
+var (
+	_ runner.Runner = (*fakeRunner)(nil)
+	_ runner.Runner = (*blockingRunner)(nil)
+)

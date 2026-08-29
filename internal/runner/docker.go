@@ -168,27 +168,34 @@ func (r *DockerRunner) runSetup(ctx context.Context, containerID string, setupCm
 			return err
 		}
 	}
+	// Start each job with an empty env file so a step can append to it and
+	// later steps can read it back, even if no earlier step wrote anything.
+	if _, _, _, err := r.execCommand(ctx, containerID, ": > "+envFilePath, nil); err != nil {
+		return fmt.Errorf("failed to initialize env file: %w", err)
+	}
 	return nil
 }
 
 func (r *DockerRunner) runSteps(ctx context.Context, containerID string, steps []domain.Step) ([]domain.StepResult, error) {
 	stepResults := make([]domain.StepResult, 0, len(steps))
 
-	// Start each job with an empty env file so a step can append to it and
-	// later steps can read it back, even if no earlier step wrote anything.
-	if _, _, _, err := r.execCommand(ctx, containerID, ": > "+envFilePath, nil); err != nil {
-		return stepResults, fmt.Errorf("failed to initialize env file: %w", err)
-	}
-
 	for _, step := range steps {
+		stepStartTime := time.Now()
+
 		// Vars exported by earlier steps, injected as this exec's env. Exec env
 		// overrides the container's job-level env.
 		exported, err := r.readExportedEnv(ctx, containerID)
 		if err != nil {
+			stepResults = append(stepResults, domain.StepResult{
+				StepName: step.Name,
+				Stdout:   err.Error(),
+				Stderr:   err.Error(),
+				ExitCode: domain.ExitFailure,
+				Duration: time.Since(stepStartTime),
+			})
 			return stepResults, fmt.Errorf("failed to read exported env before step %q: %w", step.Name, err)
 		}
 
-		stepStartTime := time.Now()
 		type stepResult struct {
 			ExitCode domain.ExitCode
 			Stdout   string
@@ -250,6 +257,13 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, steps [
 		// omitted since they may hold secrets; a future UI can show them.
 		after, err := r.readExportedEnv(ctx, containerID)
 		if err != nil {
+			stepResults = append(stepResults, domain.StepResult{
+				StepName: step.Name,
+				Stdout:   err.Error(),
+				Stderr:   err.Error(),
+				ExitCode: domain.ExitFailure,
+				Duration: time.Since(stepStartTime),
+			})
 			return stepResults, fmt.Errorf("failed to read exported env after step %q: %w", step.Name, err)
 		}
 		if keys := newlyExportedKeys(exported, after); len(keys) > 0 {

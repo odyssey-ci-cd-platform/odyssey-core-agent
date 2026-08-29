@@ -2,8 +2,8 @@ package domain
 
 // Step is a single shell command within a job.
 type Step struct {
-	Name string
-	Run  string
+	Name    string
+	Run     string
 	Timeout int
 }
 

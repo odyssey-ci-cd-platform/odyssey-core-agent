@@ -58,7 +58,13 @@ func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, project
 			jobLogger := stageLogger.With("job", job.Name)
 			jobCtx := common.ContextWithLogger(ctx, jobLogger)
 
-			jobResult, _ := o.runner.Run(jobCtx, job, projectPath)
+			jobResult, err := o.runner.Run(jobCtx, job, projectPath)
+			if err != nil {
+				jobLogger.Error("job failed",
+					"job", job.Name,
+					"stepCount", len(jobResult.StepResults),
+				)
+			}
 			mu.Lock()
 			jobResults[i] = jobResult
 			mu.Unlock()
@@ -68,7 +74,7 @@ func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, project
 	_ = g.Wait()
 
 	stageResult := domain.StageResult{
-		StageName: stage.Name,
+		StageName:  stage.Name,
 		JobResults: jobResults,
 	}
 	stageLogger.Info("stage finished",
@@ -77,4 +83,3 @@ func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, project
 	)
 	return stageResult
 }
-

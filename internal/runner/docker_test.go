@@ -2,7 +2,6 @@ package runner_test
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -90,9 +89,10 @@ func TestDockerRunnerRunFailingCommand(t *testing.T) {
 	defer cancel()
 
 	result, err := r.Run(ctx, job, dir)
-	// Run returns the step error; the job itself still completed
+	// A failing command must return an error in addition to the failed
+	// step result.
 	if err == nil {
-		t.Log("Run() returned nil error for failing command")
+		t.Error("Run() returned nil error for a failing command")
 	}
 
 	status := result.Status()
@@ -145,11 +145,6 @@ func TestDockerRunnerRunWithEnvVars(t *testing.T) {
 func TestDockerRunnerRunWithSetup(t *testing.T) {
 	r := requireDocker(t)
 	dir := t.TempDir()
-
-	// Create a file that the setup will modify
-	if err := os.WriteFile(dir+"/input.txt", []byte("original"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
 	job := domain.Job{
 		Name:  "setup-test",
@@ -312,6 +307,87 @@ func TestDockerRunnerRunSetupError(t *testing.T) {
 	}
 }
 
+func TestDockerRunnerRunImagePullError(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "bad-image-test",
+		Image: "alpine:odyssey-no-such-tag",
+		Steps: []domain.Step{
+			{Name: "should not run", Run: "echo nope"},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := r.Run(ctx, job, dir)
+	if err == nil {
+		t.Fatal("Run() expected an error for a missing image, got nil")
+	}
+	if result.SetupErr == nil {
+		t.Error("expected SetupErr to be set when image pull fails")
+	}
+	if result.Status() != domain.StatusErrored {
+		t.Errorf("expected StatusErrored, got %v", result.Status())
+	}
+}
+
+func TestDockerRunnerRunMountError(t *testing.T) {
+	r := requireDocker(t)
+
+	job := domain.Job{
+		Name:  "bad-mount-test",
+		Image: "alpine:latest",
+		Steps: []domain.Step{
+			{Name: "should not run", Run: "echo nope"},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// A nonexistent project path makes mountArchive fail after the container
+	// is created, surfacing as a setup error.
+	result, err := r.Run(ctx, job, "/nonexistent/odyssey/project")
+	if err == nil {
+		t.Fatal("Run() expected an error for a missing project path, got nil")
+	}
+	if result.SetupErr == nil {
+		t.Error("expected SetupErr to be set when mounting the project fails")
+	}
+	if result.Status() != domain.StatusErrored {
+		t.Errorf("expected StatusErrored, got %v", result.Status())
+	}
+}
+
+func TestDockerRunnerRunExportedEnvReadError(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "env-read-error-test",
+		Image: "alpine:latest",
+		Steps: []domain.Step{
+			// Removing the env file makes the after-step readExportedEnv fail,
+			// which must surface as a failed step, not a silent pass.
+			{Name: "remove env file", Run: `rm -f "$ODYSSEY_ENV"`},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := r.Run(ctx, job, dir)
+	if err == nil {
+		t.Fatal("Run() expected an error when the env file can't be read, got nil")
+	}
+	if result.Status() != domain.StatusFailed {
+		t.Errorf("expected StatusFailed, got %v", result.Status())
+	}
+}
+
 func TestDockerRunnerRunStepDuration(t *testing.T) {
 	r := requireDocker(t)
 	dir := t.TempDir()
@@ -337,20 +413,17 @@ func TestDockerRunnerRunStepDuration(t *testing.T) {
 		t.Fatalf("expected 2 step results, got %d", len(result.StepResults))
 	}
 
-	// Each step should have a non-zero duration
 	for _, sr := range result.StepResults {
 		if sr.Duration <= 0 {
 			t.Errorf("step %q: expected positive duration, got %v", sr.StepName, sr.Duration)
 		}
 	}
 
-	// The "slow" step should take at least 1 second
 	slowDuration := result.StepResults[1].Duration
 	if slowDuration < time.Second {
 		t.Errorf("slow step duration %v is less than 1s", slowDuration)
 	}
 
-	// Job duration should be sum of step durations
 	expectedTotal := result.StepResults[0].Duration + result.StepResults[1].Duration
 	if result.Duration() != expectedTotal {
 		t.Errorf("job Duration() = %v, want %v", result.Duration(), expectedTotal)

@@ -356,3 +356,67 @@ func TestDockerRunnerRunStepDuration(t *testing.T) {
 		t.Errorf("job Duration() = %v, want %v", result.Duration(), expectedTotal)
 	}
 }
+
+func TestDockerRunnerRunStepTimeout(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "timeout-test",
+		Image: "alpine:latest",
+		Steps: []domain.Step{
+			{Name: "slow", Run: "sleep 5", Timeout: 200},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := r.Run(ctx, job, dir)
+	if err == nil {
+		t.Fatal("Run() expected an error for a step exceeding its timeout, got nil")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("expected timeout error, got: %v", err)
+	}
+
+	// The timed-out step must surface as a failed step result, so the job
+	// reports Failed (never Pending).
+	if len(result.StepResults) != 1 {
+		t.Fatalf("expected 1 failed step result for a timed-out step, got %d", len(result.StepResults))
+	}
+	if result.StepResults[0].ExitCode != domain.ExitFailure {
+		t.Errorf("timed-out step ExitCode = %v, want ExitFailure", result.StepResults[0].ExitCode)
+	}
+	if result.Status() != domain.StatusFailed {
+		t.Errorf("Status() = %v, want StatusFailed", result.Status())
+	}
+}
+
+func TestDockerRunnerRunStepWithinTimeout(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "within-timeout-test",
+		Image: "alpine:latest",
+		Steps: []domain.Step{
+			{Name: "quick", Run: "echo done", Timeout: 5000},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := r.Run(ctx, job, dir)
+	if err != nil {
+		t.Fatalf("Run() unexpected error: %v", err)
+	}
+
+	if len(result.StepResults) != 1 {
+		t.Fatalf("expected 1 step result, got %d", len(result.StepResults))
+	}
+	if !strings.Contains(result.StepResults[0].Stdout, "done") {
+		t.Errorf("expected stdout to contain 'done', got %q", result.StepResults[0].Stdout)
+	}
+}

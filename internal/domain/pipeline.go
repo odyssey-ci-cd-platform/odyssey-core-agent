@@ -4,6 +4,7 @@ package domain
 type Step struct {
 	Name string
 	Run  string
+	Timeout int
 }
 
 // Job is a collection of steps executed inside a container.

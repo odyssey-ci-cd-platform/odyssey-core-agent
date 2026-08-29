@@ -189,17 +189,61 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, steps [
 		}
 
 		stepStartTime := time.Now()
-		exitCode, stdout, stderr, runErr := r.execCommand(ctx, containerID, step.Run, envSlice(exported))
-		stepResults = append(stepResults, domain.StepResult{
-			StepName: step.Name,
-			Stdout:   stdout,
-			Stderr:   stderr,
-			ExitCode: exitCode,
-			Duration: time.Since(stepStartTime),
-		})
+		type stepResult struct {
+			ExitCode domain.ExitCode
+			Stdout   string
+			Stderr   string
+			RunErr   error
+		}
+		stepChan := make(chan stepResult, 1)
 
-		if runErr != nil {
-			return stepResults, runErr
+		timeoutCtx := ctx
+		var cancel context.CancelFunc
+
+		if step.Timeout > 0 {
+			timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(step.Timeout)*time.Millisecond)
+		}
+
+		go func() {
+			exitCode, stdout, stderr, runErr := r.execCommand(timeoutCtx, containerID, step.Run, envSlice(exported))
+			stepChan <- stepResult{
+				ExitCode: exitCode,
+				Stdout:   stdout,
+				Stderr:   stderr,
+				RunErr:   runErr,
+			}
+		}()
+
+		select {
+		case <-timeoutCtx.Done():
+			if cancel != nil {
+				cancel()
+			}
+			timeoutErr := fmt.Errorf("step %s timed out after %dms", step.Name, step.Timeout)
+			r.logger.Error(timeoutErr.Error())
+			stepResults = append(stepResults, domain.StepResult{
+				StepName: step.Name,
+				Stdout:   timeoutErr.Error(),
+				Stderr:   timeoutErr.Error(),
+				ExitCode: domain.ExitFailure,
+				Duration: time.Since(stepStartTime),
+			})
+			return stepResults, timeoutErr
+		case res := <-stepChan:
+			if cancel != nil {
+				cancel()
+			}
+			stepResults = append(stepResults, domain.StepResult{
+				StepName: step.Name,
+				Stdout:   res.Stdout,
+				Stderr:   res.Stderr,
+				ExitCode: res.ExitCode,
+				Duration: time.Since(stepStartTime),
+			})
+			if res.RunErr != nil {
+				r.logger.Error("step %s failed to run: %v", step.Name, res.RunErr)
+				return stepResults, res.RunErr
+			}
 		}
 
 		// Surface which vars this step exported for later steps. Values are

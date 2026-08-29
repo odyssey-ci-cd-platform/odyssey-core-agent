@@ -66,8 +66,9 @@ func translate(root RootConfig, globalEnv map[string]string) domain.Pipeline {
 		}
 		for _, stepCfg := range jobCfg.Steps {
 			job.Steps = append(job.Steps, domain.Step{
-				Name: stepCfg.Name,
-				Run:  stepCfg.Run,
+				Name:    stepCfg.Name,
+				Run:     stepCfg.Run,
+				Timeout: stepCfg.Timeout,
 			})
 		}
 		jobsByStage[jobCfg.Stage] = append(jobsByStage[jobCfg.Stage], job)

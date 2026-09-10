@@ -5,7 +5,7 @@
 
 ## Overview
 
-Odyssey is a language-agnostic, configuration-driven CI/CD testing platform. It is a long-term project.
+Odyssey is a language-agnostic, configuration-driven CI/CD testing platform.
 
 The core bet is that pipeline execution itself is a commodity - every CI vendor already does it adequately. The differentiated value is an **intelligence layer** sitting on top of execution results: per-test flakiness detection, test ownership tracking, and trend analytics. No surveyed competitor (GitHub Actions, GitLab CI, CircleCI, Tangled Spindles) offers this natively.
 

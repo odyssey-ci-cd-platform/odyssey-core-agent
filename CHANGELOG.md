@@ -24,9 +24,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!--
-Add new entries under the matching heading. Example:
-
 ### Added
-- Per-step execution timeout, configurable via pipeline TOML (gh-13).
--->
+- Event bus technology decision record: Redis Streams chosen for v1 (gh-38).

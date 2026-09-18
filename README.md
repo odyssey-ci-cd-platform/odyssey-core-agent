@@ -147,7 +147,7 @@ flowchart TD
 
 Deliberately two sinks with different semantics, not one box doing both jobs:
 
-- Event bus: ephemeral, multi-consumer, real-time. Candidate implementations: Redis Streams (low effort, fits single-binary philosophy) vs. Kafka/NATS JetStream (replay, consumer groups, more moving parts). Leaning Redis Streams for v1.
+- Event bus: ephemeral, multi-consumer, real-time. **Decided: Redis Streams for v1** — see [ADR 0001](docs/adr/0001-event-bus-technology.md) for the trade-off analysis (Kafka rejected as ops-heavy; NATS JetStream kept as the growth path).
 - Results DB: durable, queryable, the source of truth for flakiness/trend analysis over time.
 
 ### AI engine (narrowed scope)

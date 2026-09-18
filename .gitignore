@@ -1,3 +1,4 @@
 .env
-.claude/
-CLAUDE.md
+.agents/
+AGENTS.md
+coverage.out

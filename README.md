@@ -169,6 +169,7 @@ Single job only: given a flagged failure (new failure, or high flakiness score) 
 - Schema fields should be minimal and orthogonal; validate contradictory combinations at parse time (Pydantic cross-field validators, or Go equivalent).
 - Deferring `services`, network features, CVE scanning, and CLI is the right call to maintain focus on the intelligence layer.
 - Internal calls to odyssey-core go through its gRPC interface — not through a CLI, which is a human-facing convenience layered on top, built later.
+- The orchestrator is the gRPC **client**; the agent stays a passive, request/response executor (decided in gh-16). Agent-initiated registration/polling models were considered and rejected — nothing in the architecture needs an agent that dials out. Lifecycle concerns (heartbeats, retries, result streaming) belong to the orchestrator/event-bus side, tracked in gh-17 and gh-35.
 
 ## Roadmap
 

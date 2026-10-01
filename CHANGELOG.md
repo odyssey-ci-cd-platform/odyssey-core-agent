@@ -26,3 +26,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - Event bus technology decision record: Redis Streams chosen for v1 (gh-38).
 - Process scaffolding ported from the cubicle project: issue-first workflow with solution-template and PR-link automation, one-shot ship/merge scripts, RUNBOOK.md with recorded baseline, gitignored STATE.md, and a `make check` gate.
+- CI workflow running `make check` on every PR and push to main; branch protection on main requires the `check` status and pull requests.

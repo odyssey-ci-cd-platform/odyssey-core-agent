@@ -5,6 +5,9 @@ set -eu
 
 branch=${1:?branch required}
 
+# The required status check must be green on the head before GitHub will
+# accept the merge; merging straight after a push races it.
+gh pr checks "$branch" --watch --interval 10
 gh pr merge "$branch" --merge --delete-branch
 git checkout main
 git pull

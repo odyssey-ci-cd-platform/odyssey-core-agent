@@ -12,19 +12,38 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// EventSink publishes lifecycle events to the event bus. Nil means the
+// event bus is disabled; the engine stays runnable without Redis (ADR 0001).
+type EventSink interface {
+	Publish(ctx context.Context, event domain.Event) error
+}
+
 // Orchestrator executes a Pipeline by running stages sequentially and
 // jobs within each stage concurrently.
 type Orchestrator struct {
 	runner runner.Runner
+	sink   EventSink
 	logger *slog.Logger
 }
 
-// New returns an Orchestrator that delegates job execution to r.
-func New(r runner.Runner, logger *slog.Logger) *Orchestrator {
+// New returns an Orchestrator that delegates job execution to r and emits
+// lifecycle events to sink (may be nil to disable emission).
+func New(r runner.Runner, sink EventSink, logger *slog.Logger) *Orchestrator {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	return &Orchestrator{runner: r, logger: logger}
+	return &Orchestrator{runner: r, sink: sink, logger: logger}
+}
+
+// emit publishes one lifecycle event. Emission failures are logged, never
+// fatal — pipeline execution proceeds unaffected (ADR 0001).
+func (o *Orchestrator) emit(ctx context.Context, event domain.Event) {
+	if o.sink == nil {
+		return
+	}
+	if err := o.sink.Publish(ctx, event); err != nil {
+		o.logger.Warn("event emit failed", "type", event.Type, "pipeline", event.Pipeline, "err", err)
+	}
 }
 
 // Run executes every stage in the pipeline. Jobs within a stage run
@@ -34,16 +53,23 @@ func (o *Orchestrator) Run(ctx context.Context, pipeline domain.Pipeline, projec
 		PipelineName: pipeline.Name,
 		StageResults: make([]domain.StageResult, 0, len(pipeline.Stages)),
 	}
+	o.emit(ctx, domain.Event{Type: domain.EventPipelineStarted, OccurredAt: time.Now(), Pipeline: pipeline.Name})
 	for _, stage := range pipeline.Stages {
-		stageResult := o.runStage(ctx, stage, projectPath)
+		stageResult := o.runStage(ctx, stage, pipeline.Name, projectPath)
 		result.StageResults = append(result.StageResults, stageResult)
 	}
+	o.emit(ctx, domain.Event{
+		Type:       domain.EventPipelineFinished,
+		OccurredAt: time.Now(),
+		Pipeline:   pipeline.Name,
+		Payload:    map[string]string{"status": result.Status().String()},
+	})
 	return result, nil
 }
 
 // runStage executes all jobs in a stage concurrently and returns the
 // aggregated StageResult.
-func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, projectPath string) domain.StageResult {
+func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, pipelineName string, projectPath string) domain.StageResult {
 	stageLogger := o.logger.With("stage", stage.Name)
 	stageLogger.Info("stage started")
 	start := time.Now()
@@ -58,7 +84,15 @@ func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, project
 			jobLogger := stageLogger.With("job", job.Name)
 			jobCtx := common.ContextWithLogger(ctx, jobLogger)
 
+			o.emit(jobCtx, domain.Event{Type: domain.EventJobStarted, OccurredAt: time.Now(), Pipeline: pipelineName, Job: job.Name})
 			jobResult, err := o.runner.Run(jobCtx, job, projectPath)
+			o.emit(jobCtx, domain.Event{
+				Type:       domain.EventJobFinished,
+				OccurredAt: time.Now(),
+				Pipeline:   pipelineName,
+				Job:        job.Name,
+				Payload:    map[string]string{"status": jobResult.Status().String()},
+			})
 			if err != nil {
 				jobLogger.Error("job failed",
 					"job", job.Name,

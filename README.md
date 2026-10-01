@@ -210,7 +210,6 @@ Single job only: given a flagged failure (new failure, or high flakiness score) 
 
 ## Open questions
 
-- Event bus technology: Redis Streams (simpler) vs. Kafka/NATS (more capable, more ops overhead)?
 - Registry proxy: rewrite image references at orchestration time, or rely on Docker daemon `registry-mirrors`?
 - Does `dataVizService` need direct results-DB query access on day one, or can it start off the event bus only?
 - Should `loggingService` persist to durable storage independently of the streaming layer, rather than only riding the ephemeral event bus?

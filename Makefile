@@ -1,4 +1,5 @@
-.PHONY: proto
+.PHONY: proto check
+
 proto:
 	protoc \
 		--proto_path=api/v1 \
@@ -7,3 +8,7 @@ proto:
 		--go-grpc_out=gen/proto/v1 \
 		--go-grpc_opt=paths=source_relative \
 		api/v1/odyssey.proto
+
+check:
+	go vet ./...
+	go test ./...

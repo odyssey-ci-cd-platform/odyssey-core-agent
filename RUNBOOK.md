@@ -30,8 +30,9 @@ Rules in `AGENTS.md` → Workflow. Sequence:
    comment automatically. First actionable: fill it in by editing the
    posted comment — every header kept, N/A where not required. One-commit
    task → skip this step.
-2. `git checkout -b feature/<issue-number>` (issueless housekeeping lands
-   directly on main, per existing precedent).
+2. `git checkout -b <branch>` — `feature/<issue-number>`, or issueless
+   `type/slug`. All changes land through PRs: main is protected (required
+   `check` status, no direct pushes, admins included).
 3. Write the failing intent test first — red before the change.
 4. Change until `make check` matches the recorded baseline or better.
 5. Commit: `gh-<issue_number>: <summary>`, imperative mood.

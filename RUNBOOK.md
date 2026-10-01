@@ -45,7 +45,7 @@ Rules in `AGENTS.md` → Workflow. Sequence:
    `scripts/merge-pr.sh <branch>`.
 9. `git checkout main && git pull && git branch -d <branch>`.
 
-Verify: PR merged, branch gone on both ends, `make check` on main matches
+Verify: PR merged, branch gone on both ends. `make check` on main matches
 the recorded baseline.
 
 ### 1.4 Docs changes
@@ -84,5 +84,5 @@ Format: symptom → diagnose → resolve.
 
 ### 3.3 New incident
 
-Any failure that costs more than a minute to diagnose gets a section
-here: symptom → diagnose → resolve, three bullets each.
+Any failure that costs more than a minute to diagnose gets a section here:
+symptom → diagnose → resolve, three bullets each.

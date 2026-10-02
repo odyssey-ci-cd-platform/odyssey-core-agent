@@ -81,6 +81,135 @@ func simpleJob(name string) domain.Job {
 	}
 }
 
+// fakeSink is an EventSink that records events in memory, or fails every
+// publish when err is set.
+type fakeSink struct {
+	err error
+
+	mu     sync.Mutex
+	events []domain.Event
+}
+
+func (f *fakeSink) Publish(_ context.Context, event domain.Event) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.events = append(f.events, event)
+	return nil
+}
+
+func (f *fakeSink) recorded() []domain.Event {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.Event(nil), f.events...)
+}
+
+// eventsOfType returns the events whose Type matches typ.
+func eventsOfType(events []domain.Event, typ string) []domain.Event {
+	var out []domain.Event
+	for _, e := range events {
+		if e.Type == typ {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestOrchestratorEmitsLifecycleEvents(t *testing.T) {
+	// Requirement (gh-52, ADR 0001): a pipeline run emits started/finished
+	// events for the pipeline and for each job, with finished events
+	// carrying the aggregated status.
+	fake := &fakeSink{}
+	r := &fakeRunner{results: map[string]domain.JobResult{
+		"a": newPassedJob("a"),
+		"b": newFailedJob("b"),
+		"c": newErroredJob("c"),
+	}}
+	o := orchestrator.New(r, fake, nil)
+	pipeline := domain.Pipeline{
+		Name: "shop",
+		Stages: []domain.Stage{
+			{Name: "build", Jobs: []domain.Job{simpleJob("a"), simpleJob("b"), simpleJob("c")}},
+		},
+	}
+	if _, err := o.Run(context.Background(), pipeline, "."); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	events := fake.recorded()
+	if len(events) != 8 {
+		t.Fatalf("got %d events, want 8: %+v", len(events), events)
+	}
+	first, last := events[0], events[len(events)-1]
+	if first.Type != domain.EventPipelineStarted || first.Pipeline != "shop" {
+		t.Errorf("first event = %+v, want pipeline started for shop", first)
+	}
+	if last.Type != domain.EventPipelineFinished || last.Pipeline != "shop" {
+		t.Errorf("last event = %+v, want pipeline finished for shop", last)
+	}
+	if got := last.Payload["status"]; got != domain.StatusErrored.String() {
+		t.Errorf("pipeline finished payload status = %q, want %q (Error > Failed precedence)", got, domain.StatusErrored.String())
+	}
+
+	wantStatus := map[string]domain.Status{
+		"a": domain.StatusPassed,
+		"b": domain.StatusFailed,
+		"c": domain.StatusErrored,
+	}
+	for job, status := range wantStatus {
+		started, finished := -1, -1
+		for i, e := range events {
+			if e.Job != job {
+				continue
+			}
+			switch e.Type {
+			case domain.EventJobStarted:
+				started = i
+			case domain.EventJobFinished:
+				finished = i
+				if got := e.Payload["status"]; got != status.String() {
+					t.Errorf("job %s finished payload status = %q, want %q", job, got, status.String())
+				}
+			}
+		}
+		if started == -1 || finished == -1 {
+			t.Errorf("job %s: missing started or finished event in %+v", job, events)
+			continue
+		}
+		if started > finished {
+			t.Errorf("job %s: started event at %d after finished event at %d", job, started, finished)
+		}
+	}
+	if got := len(eventsOfType(events, domain.EventPipelineStarted)); got != 1 {
+		t.Errorf("got %d pipeline started events, want 1", got)
+	}
+	if got := len(eventsOfType(events, domain.EventPipelineFinished)); got != 1 {
+		t.Errorf("got %d pipeline finished events, want 1", got)
+	}
+}
+
+func TestOrchestratorSinkErrorDoesNotFailRun(t *testing.T) {
+	// Requirement (ADR 0001 graceful degradation): emission failures are
+	// logged, never fatal — Run's outcome is unchanged when the bus is down.
+	breaking := &fakeSink{err: &stubError{"bus down"}}
+	r := &fakeRunner{results: map[string]domain.JobResult{"a": newPassedJob("a")}}
+	pipeline := domain.Pipeline{
+		Name: "shop",
+		Stages: []domain.Stage{
+			{Name: "build", Jobs: []domain.Job{simpleJob("a")}},
+		},
+	}
+	result, err := orchestrator.New(r, breaking, nil).Run(context.Background(), pipeline, ".")
+	if err != nil {
+		t.Fatalf("Run with failing sink: %v", err)
+	}
+	if result.Status() != domain.StatusPassed {
+		t.Errorf("status = %v, want passed despite failing sink", result.Status())
+	}
+}
+
 func TestOrchestratorSingleStageSingleJob(t *testing.T) {
 	r := &fakeRunner{
 		results: map[string]domain.JobResult{
@@ -88,7 +217,7 @@ func TestOrchestratorSingleStageSingleJob(t *testing.T) {
 		},
 		errs: map[string]error{},
 	}
-	o := orchestrator.New(r, nil)
+	o := orchestrator.New(r, nil, nil)
 
 	pipeline := domain.Pipeline{
 		Name: "ci",
@@ -136,7 +265,7 @@ func TestOrchestratorSingleStageMultipleJobs(t *testing.T) {
 		},
 		errs: map[string]error{},
 	}
-	o := orchestrator.New(r, nil)
+	o := orchestrator.New(r, nil, nil)
 
 	pipeline := domain.Pipeline{
 		Name: "ci",
@@ -190,7 +319,7 @@ func TestOrchestratorMultipleStages(t *testing.T) {
 		},
 		errs: map[string]error{},
 	}
-	o := orchestrator.New(r, nil)
+	o := orchestrator.New(r, nil, nil)
 
 	pipeline := domain.Pipeline{
 		Name: "full-ci",
@@ -248,7 +377,7 @@ func TestOrchestratorMixedStatuses(t *testing.T) {
 			"dead": &stubError{"setup failed"}, // Runner returns the error too
 		},
 	}
-	o := orchestrator.New(r, nil)
+	o := orchestrator.New(r, nil, nil)
 
 	pipeline := domain.Pipeline{
 		Name: "mixed-ci",
@@ -284,7 +413,7 @@ func TestOrchestratorEmptyPipeline(t *testing.T) {
 		results: map[string]domain.JobResult{},
 		errs:    map[string]error{},
 	}
-	o := orchestrator.New(r, nil)
+	o := orchestrator.New(r, nil, nil)
 
 	pipeline := domain.Pipeline{
 		Name:   "empty",
@@ -321,7 +450,7 @@ func TestOrchestratorJobsRunConcurrently(t *testing.T) {
 			"c": newPassedJob("c"),
 		},
 	}
-	o := orchestrator.New(rb, nil)
+	o := orchestrator.New(rb, nil, nil)
 
 	pipeline := domain.Pipeline{
 		Name: "concurrent",
@@ -377,7 +506,7 @@ func TestOrchestratorRunnerErrorDoesNotBlockOtherJobs(t *testing.T) {
 			"dead": &stubError{"setup failed"},
 		},
 	}
-	o := orchestrator.New(r, nil)
+	o := orchestrator.New(r, nil, nil)
 
 	pipeline := domain.Pipeline{
 		Name: "error-test",

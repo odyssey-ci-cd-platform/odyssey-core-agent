@@ -8,6 +8,8 @@ const (
 	EventPipelineFinished = "pipeline.finished"
 	EventJobStarted       = "job.started"
 	EventJobFinished      = "job.finished"
+	EventStepStarted      = "step.started"
+	EventStepFinished     = "step.finished"
 )
 
 // Event is one lifecycle event envelope for the event bus (ADR 0001).

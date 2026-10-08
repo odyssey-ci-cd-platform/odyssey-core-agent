@@ -17,14 +17,23 @@ type fakeRunner struct {
 	errs    map[string]error
 
 	mu    sync.Mutex
-	calls []string // records job names in the order Run() was called
+	calls []string         // records job names in the order Run() was called
+	sinks []runner.StepSink // records the sink each Run() received
 }
 
-func (f *fakeRunner) Run(_ context.Context, job domain.Job, _ string) (domain.JobResult, error) {
+func (f *fakeRunner) Run(_ context.Context, job domain.Job, _ string, events runner.StepSink) (domain.JobResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, job.Name)
+	f.sinks = append(f.sinks, events)
 	f.mu.Unlock()
 	return f.results[job.Name], f.errs[job.Name]
+}
+
+// receivedSinks returns the sinks observed by Run(), in call order.
+func (f *fakeRunner) receivedSinks() []runner.StepSink {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]runner.StepSink(nil), f.sinks...)
 }
 
 // blockingRunner blocks each Run() call until the test releases it, to verify that jobs within a stage start concurrently.
@@ -34,7 +43,7 @@ type blockingRunner struct {
 	results map[string]domain.JobResult
 }
 
-func (b *blockingRunner) Run(_ context.Context, job domain.Job, _ string) (domain.JobResult, error) {
+func (b *blockingRunner) Run(_ context.Context, job domain.Job, _ string, _ runner.StepSink) (domain.JobResult, error) {
 	b.entered.Done()
 	<-b.release
 	return b.results[job.Name], nil
@@ -104,6 +113,56 @@ func (f *fakeSink) recorded() []domain.Event {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]domain.Event(nil), f.events...)
+}
+
+// TestOrchestratorPassesSinkToRunner asserts the orchestrator hands its event
+// sink to the runner (nil stays nil) and stamps runner-published events with
+// the pipeline name (gh-52: step transitions originate in the runner, but the
+// runner doesn't know the pipeline, so the orchestrator stamps on the way out).
+func TestOrchestratorPassesSinkToRunner(t *testing.T) {
+	pipeline := domain.Pipeline{
+		Name:   "pipe",
+		Stages: []domain.Stage{{Name: "stage", Jobs: []domain.Job{simpleJob("job-a")}}},
+	}
+
+	t.Run("configured sink reaches the runner, stamped with the pipeline", func(t *testing.T) {
+		sink := &fakeSink{}
+		fake := &fakeRunner{results: map[string]domain.JobResult{"job-a": newPassedJob("job-a")}}
+		_, _ = orchestrator.New(fake, sink, nil).Run(context.Background(), pipeline, t.TempDir())
+
+		sinks := fake.receivedSinks()
+		if len(sinks) != 1 || sinks[0] == nil {
+			t.Fatalf("runner received sinks %v, want exactly one non-nil", sinks)
+		}
+		if err := sinks[0].Publish(context.Background(), domain.Event{Type: domain.EventStepStarted, Step: "s"}); err != nil {
+			t.Fatalf("publish through received sink: %v", err)
+		}
+		// The sink also records the orchestrator's own lifecycle events; the
+		// synthetic one is identifiable by type and step.
+		var stamped *domain.Event
+		for i := range sink.recorded() {
+			if e := sink.recorded()[i]; e.Type == domain.EventStepStarted && e.Step == "s" {
+				stamped = &sink.recorded()[i]
+				break
+			}
+		}
+		if stamped == nil {
+			t.Fatal("synthetic step.started event not found on the sink")
+		}
+		if stamped.Pipeline != "pipe" {
+			t.Errorf("stamped pipeline = %q, want %q", stamped.Pipeline, "pipe")
+		}
+	})
+
+	t.Run("nil sink passes through as nil", func(t *testing.T) {
+		fake := &fakeRunner{results: map[string]domain.JobResult{"job-a": newPassedJob("job-a")}}
+		_, _ = orchestrator.New(fake, nil, nil).Run(context.Background(), pipeline, t.TempDir())
+
+		sinks := fake.receivedSinks()
+		if len(sinks) != 1 || sinks[0] != nil {
+			t.Fatalf("runner received sinks %v, want exactly one nil", sinks)
+		}
+	})
 }
 
 // eventsOfType returns the events whose Type matches typ.

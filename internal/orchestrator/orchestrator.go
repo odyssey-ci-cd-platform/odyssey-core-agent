@@ -46,6 +46,29 @@ func (o *Orchestrator) emit(ctx context.Context, event domain.Event) {
 	}
 }
 
+// stepSink returns the sink handed to the runner: nil when the bus is
+// disabled, otherwise a view stamping runner-built events with the pipeline
+// name before emission — the runner knows steps, not which pipeline it
+// serves (ADR 0001: envelopes carry the pipeline).
+func (o *Orchestrator) stepSink(pipelineName string) runner.StepSink {
+	if o.sink == nil {
+		return nil
+	}
+	return &stampedSink{sink: o.sink, pipeline: pipelineName}
+}
+
+// stampedSink adapts the orchestrator's EventSink to runner.StepSink,
+// filling in the pipeline name on every event that passes through.
+type stampedSink struct {
+	sink     EventSink
+	pipeline string
+}
+
+func (s *stampedSink) Publish(ctx context.Context, event domain.Event) error {
+	event.Pipeline = s.pipeline
+	return s.sink.Publish(ctx, event)
+}
+
 // Run executes every stage in the pipeline. Jobs within a stage run
 // concurrently. All stages are executed regardless of failures.
 func (o *Orchestrator) Run(ctx context.Context, pipeline domain.Pipeline, projectPath string) (domain.PipelineResult, error) {
@@ -85,7 +108,7 @@ func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, pipelin
 			jobCtx := common.ContextWithLogger(ctx, jobLogger)
 
 			o.emit(jobCtx, domain.Event{Type: domain.EventJobStarted, OccurredAt: time.Now(), Pipeline: pipelineName, Job: job.Name})
-			jobResult, err := o.runner.Run(jobCtx, job, projectPath)
+			jobResult, err := o.runner.Run(jobCtx, job, projectPath, o.stepSink(pipelineName))
 			o.emit(jobCtx, domain.Event{
 				Type:       domain.EventJobFinished,
 				OccurredAt: time.Now(),

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,6 +80,36 @@ steps = [{ name = "run", run = "echo hi" }]
 	}
 	if !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "no jobs") {
 		t.Errorf("error should name the empty stage, got: %v", err)
+	}
+}
+
+// TestLoadJobOrderIsDeterministic asserts jobs within a stage come back in
+// a stable order (sorted by key) regardless of map iteration (AUD-008).
+func TestLoadJobOrderIsDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	writeOdysseyConfig(t, dir, `[pipeline]
+name = "ci"
+stages = ["build"]
+
+[jobs.zebra]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo zebra" }]
+
+[jobs.aardvark]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo aardvark" }]
+`, "")
+
+	pipeline, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	got := []string{pipeline.Stages[0].Jobs[0].Name, pipeline.Stages[0].Jobs[1].Name}
+	want := []string{"aardvark", "zebra"}
+	if !slices.Equal(got, want) {
+		t.Errorf("job order = %v, want sorted %v", got, want)
 	}
 }
 

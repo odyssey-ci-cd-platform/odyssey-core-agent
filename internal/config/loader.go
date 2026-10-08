@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/common"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
@@ -55,9 +56,12 @@ func loadEnv(odysseyPath string) (map[string]string, error) {
 // translate converts a validated RootConfig into a domain.Pipeline.
 // Global env is merged into each job's env, with job-level values taking precedence.
 func translate(root RootConfig, globalEnv map[string]string) domain.Pipeline {
-	// Group jobs by stage, preserving declared stage order
+	// Group jobs by stage, preserving declared stage order. Jobs are taken
+	// in sorted key order so the resulting job, result, and event order is
+	// deterministic across runs (AUD-008).
 	jobsByStage := make(map[string][]domain.Job)
-	for jobKey, jobCfg := range root.Jobs {
+	for _, jobKey := range slices.Sorted(maps.Keys(root.Jobs)) {
+		jobCfg := root.Jobs[jobKey]
 		job := domain.Job{
 			Name:  jobKey,
 			Image: jobCfg.Image,

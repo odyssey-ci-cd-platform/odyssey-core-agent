@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 - Pipeline TOML files with unknown keys are rejected at load, naming the file and keys; the undocumented job `name` key is gone from the example and fixtures (gh-68).
 - A declared stage with no jobs now fails validation instead of aggregating to Pending forever (gh-69).
+- Jobs within a stage are ordered deterministically by job key (gh-70).
 - `make check` enforces gofmt cleanliness and module tidiness alongside vet and tests (gh-78).
 
 ### Fixed

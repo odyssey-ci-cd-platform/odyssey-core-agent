@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- Repository audit process (`audit/PROCESS.md`) and the first recorded audit, evaluated at 7d7be54 (gh-60).
 - Results DB technology decision record: embedded SQLite chosen for v1, normalized schema, single results-recorder writer, direct read access for analytics services (gh-17).
 - Fan-out consumer skeleton: `internal/consumer` with consumer groups, at-least-once delivery, claim recovery, and dead-lettering to `odyssey:dead`, plus an `events-logger` reference consumer (gh-17).
 - Step started/finished events emitted by the runner during job execution, payload carrying status only (gh-52).

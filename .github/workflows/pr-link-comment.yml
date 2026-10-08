@@ -19,7 +19,9 @@ jobs:
           BODY: ${{ github.event.pull_request.body }}
           URL: ${{ github.event.pull_request.html_url }}
         run: |
-          ref=$(printf '%s' "$BODY" | grep -oE '#[0-9]+' | head -1)
+          ref=$(printf '%s' "$BODY" \
+            | grep -oE '(^|[^[:alnum:]_/])#[0-9]+' | head -1 \
+            | sed -E 's/.*#//')
           issue=$(printf '%s' "$ref" | tr -d '#')
           if [ -n "$issue" ]; then
             gh issue comment "$issue" --body "PR: $URL"

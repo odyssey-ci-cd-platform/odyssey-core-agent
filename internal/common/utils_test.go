@@ -43,6 +43,23 @@ func TestCreateTar(t *testing.T) {
 		}
 	})
 
+	t.Run("archive is a valid tar with end-of-archive blocks", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := common.CreateTar(dir)
+		if err != nil {
+			t.Fatalf("CreateTar() unexpected error: %v", err)
+		}
+		// A well-formed tar ends with two 512-byte zero blocks, so its length
+		// is always a multiple of the 512-byte block size.
+		if len(got)%512 != 0 {
+			t.Errorf("archive length = %d, want a multiple of 512 (end-of-archive blocks missing)", len(got))
+		}
+	})
+
 	t.Run("missing path returns error", func(t *testing.T) {
 		_, err := common.CreateTar(filepath.Join(t.TempDir(), "does-not-exist"))
 		if err == nil {

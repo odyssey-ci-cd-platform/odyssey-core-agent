@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -41,6 +42,19 @@ func NewDockerRunner(logger *slog.Logger) (*DockerRunner, error) {
 	return &DockerRunner{client: c, logger: logger}, nil
 }
 
+// Close releases the Docker client's connections. The runner is
+// process-scoped on a server, so Close belongs to shutdown (AUD-014).
+func (r *DockerRunner) Close() error {
+	return r.client.Close()
+}
+
+// Ping verifies the Docker daemon is reachable. Tests use it to skip
+// cleanly instead of failing or hanging when the daemon is down (AUD-017).
+func (r *DockerRunner) Ping(ctx context.Context) error {
+	_, err := r.client.Ping(ctx, client.PingOptions{})
+	return err
+}
+
 // loggerFromCtx returns the logger attached to ctx, falling back to the
 // runner's own logger when none is present.
 func (r *DockerRunner) loggerFromCtx(ctx context.Context) *slog.Logger {
@@ -69,7 +83,11 @@ func (r *DockerRunner) Run(ctx context.Context, job domain.Job, projectPath stri
 	r.loggerFromCtx(ctx).Info("container created", "containerID", shortID(containerID))
 
 	defer func() {
-		if err := r.removeContainer(ctx, containerID); err != nil {
+		// Teardown must not inherit the run's fate (AUD-001): a cancelled or
+		// timed-out run still removes its container, under its own deadline.
+		teardownCtx, teardownCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer teardownCancel()
+		if err := r.removeContainer(teardownCtx, containerID); err != nil {
 			r.loggerFromCtx(ctx).Error("remove container failed", "containerID", shortID(containerID), "error", err)
 		}
 	}()
@@ -129,8 +147,11 @@ func (r *DockerRunner) createContainer(ctx context.Context, job domain.Job, proj
 
 	resp, err := r.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
-			Image:      job.Image,
-			Env:        env,
+			Image: job.Image,
+			Env:   env,
+			// Labels mark the container as this job's so operators and tests
+			// can attribute containers to runs without guessing by image.
+			Labels:     map[string]string{"odyssey.job": job.Name},
 			WorkingDir: workDir,
 			Cmd:        []string{"sh", "-c", "tail -f /dev/null"},
 		},
@@ -164,8 +185,14 @@ func (r *DockerRunner) removeContainer(ctx context.Context, containerID string) 
 // runSetup runs setup command for the Job.
 func (r *DockerRunner) runSetup(ctx context.Context, containerID string, setupCmd []string) error {
 	for _, command := range setupCmd {
-		if _, _, _, err := r.execCommand(ctx, containerID, command, nil); err != nil {
+		code, _, _, err := r.execCommand(ctx, containerID, command, nil)
+		if err != nil {
 			return err
+		}
+		// A setup command exiting non-zero means the job cannot proceed;
+		// it is a setup failure (Errored), not a step result.
+		if code != domain.ExitSuccess {
+			return fmt.Errorf("setup command %q exited with code %d", command, code)
 		}
 	}
 	// Start each job with an empty env file so a step can append to it and
@@ -189,9 +216,8 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 		if err != nil {
 			stepResults = append(stepResults, domain.StepResult{
 				StepName: step.Name,
-				Stdout:   err.Error(),
-				Stderr:   err.Error(),
-				ExitCode: domain.ExitFailure,
+				ExitCode: domain.ExitNone,
+				Err:      err,
 				Duration: time.Since(stepStartTime),
 			})
 			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
@@ -204,58 +230,53 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 			Stderr   string
 			RunErr   error
 		}
-		stepChan := make(chan stepResult, 1)
 
-		timeoutCtx := ctx
+		stepCtx := ctx
 		var cancel context.CancelFunc
-
 		if step.Timeout > 0 {
-			timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(step.Timeout)*time.Millisecond)
+			stepCtx, cancel = context.WithTimeout(ctx, time.Duration(step.Timeout)*time.Millisecond)
 		}
 
-		go func() {
-			exitCode, stdout, stderr, runErr := r.execCommand(timeoutCtx, containerID, step.Run, envSlice(exported))
-			stepChan <- stepResult{
-				ExitCode: exitCode,
-				Stdout:   stdout,
-				Stderr:   stderr,
-				RunErr:   runErr,
-			}
-		}()
+		// execCommand honors its context, so a step deadline or a run
+		// cancellation surfaces as its error — no goroutine needed (AUD-011).
+		exitCode, stdout, stderr, runErr := r.execCommand(stepCtx, containerID, step.Run, envSlice(exported))
+		if cancel != nil {
+			cancel()
+		}
 
-		select {
-		case <-timeoutCtx.Done():
-			if cancel != nil {
-				cancel()
-			}
+		stepRes := domain.StepResult{
+			StepName: step.Name,
+			Stdout:   stdout,
+			Stderr:   stderr,
+			ExitCode: exitCode,
+			Duration: time.Since(stepStartTime),
+		}
+
+		switch {
+		case runErr != nil && ctx.Err() != nil:
+			// The run itself was cancelled or timed out — the step did not
+			// time out; report the cancellation honestly (AUD-011).
+			stepRes.ExitCode = domain.ExitNone
+			stepRes.Err = fmt.Errorf("run cancelled: %w", ctx.Err())
+			stepResults = append(stepResults, stepRes)
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepRes))
+			return stepResults, ctx.Err()
+		case runErr != nil && step.Timeout > 0 && errors.Is(runErr, context.DeadlineExceeded):
 			timeoutErr := fmt.Errorf("step %s timed out after %dms", step.Name, step.Timeout)
-			r.logger.Error(timeoutErr.Error())
-			stepResults = append(stepResults, domain.StepResult{
-				StepName: step.Name,
-				Stdout:   timeoutErr.Error(),
-				Stderr:   timeoutErr.Error(),
-				ExitCode: domain.ExitFailure,
-				Duration: time.Since(stepStartTime),
-			})
-			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
+			r.loggerFromCtx(ctx).Error(timeoutErr.Error())
+			stepRes.ExitCode = domain.ExitFailure
+			stepResults = append(stepResults, stepRes)
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepRes))
 			return stepResults, timeoutErr
-		case res := <-stepChan:
-			if cancel != nil {
-				cancel()
-			}
-			stepResults = append(stepResults, domain.StepResult{
-				StepName: step.Name,
-				Stdout:   res.Stdout,
-				Stderr:   res.Stderr,
-				ExitCode: res.ExitCode,
-				Duration: time.Since(stepStartTime),
-			})
-			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
-			if res.RunErr != nil {
-				r.logger.Error("step %s failed to run: %v", step.Name, res.RunErr)
-				return stepResults, res.RunErr
-			}
+		case runErr != nil:
+			stepRes.Err = runErr
+			stepResults = append(stepResults, stepRes)
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepRes))
+			return stepResults, runErr
 		}
+
+		stepResults = append(stepResults, stepRes)
+		r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepRes))
 
 		// Surface which vars this step exported for later steps. Values are
 		// omitted since they may hold secrets; a future UI can show them.
@@ -263,9 +284,8 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 		if err != nil {
 			stepResults = append(stepResults, domain.StepResult{
 				StepName: step.Name,
-				Stdout:   err.Error(),
-				Stderr:   err.Error(),
-				ExitCode: domain.ExitFailure,
+				ExitCode: domain.ExitNone,
+				Err:      err,
 				Duration: time.Since(stepStartTime),
 			})
 			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
@@ -305,9 +325,12 @@ func stepFinishedEvent(jobName string, result domain.StepResult) domain.Event {
 // readExportedEnv reads the in-container env file and parses its KEY=value
 // lines into a map. See parseEnvFile for the parsing rules.
 func (r *DockerRunner) readExportedEnv(ctx context.Context, containerID string) (map[string]string, error) {
-	_, stdout, _, err := r.execCommand(ctx, containerID, "cat "+envFilePath, nil)
+	code, stdout, _, err := r.execCommand(ctx, containerID, "cat "+envFilePath, nil)
 	if err != nil {
 		return nil, err
+	}
+	if code != domain.ExitSuccess {
+		return nil, fmt.Errorf("env file read exited with code %d", code)
 	}
 	return parseEnvFile(stdout), nil
 }
@@ -323,31 +346,29 @@ func (r *DockerRunner) execCommand(ctx context.Context, containerID string, comm
 	}
 	execCreateResult, err := r.client.ExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return domain.ExitFailure, "", "", err
+		return domain.ExitNone, "", "", err
 	}
 
 	execID := execCreateResult.ID
 	resp, err := r.client.ExecAttach(ctx, execID, client.ExecAttachOptions{})
 	if err != nil {
-		return domain.ExitFailure, "", "", err
+		return domain.ExitNone, "", "", err
 	}
 	defer resp.Close()
 
 	var stdout, stderr bytes.Buffer
 	if _, err := stdcopy.StdCopy(&stdout, &stderr, resp.Reader); err != nil {
-		return domain.ExitFailure, "", "", err
+		return domain.ExitNone, "", "", err
 	}
 
 	inspect, err := r.client.ExecInspect(ctx, execID, client.ExecInspectOptions{})
 	if err != nil {
-		return domain.ExitFailure, "", "", err
+		return domain.ExitNone, "", "", err
 	}
 
-	out, errOut := stdout.String(), stderr.String()
-	if inspect.ExitCode != 0 {
-		return domain.ExitFailure, out, errOut, fmt.Errorf("command exited with exit code %d", inspect.ExitCode)
-	}
-	return domain.ExitSuccess, out, errOut, nil
+	// A non-zero exit is the process's own result, not an infrastructure
+	// error: report the real code and no error (AUD-003).
+	return domain.ExitCode(inspect.ExitCode), stdout.String(), stderr.String(), nil
 }
 
 // mountArchive creates a tar of the project directory and copies it into destinationPath inside the container

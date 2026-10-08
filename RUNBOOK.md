@@ -46,6 +46,8 @@ Verify: PR merged, branch gone on both ends. `make check` on main matches the re
 
 1. Run `.agents/bin/check-docs.sh` before committing modified Markdown.
 
+CI runs the same check on every PR (the script and the rulebook are version-controlled), so a red docs check blocks merge the same as the test gate.
+
 Verify: no mid-sentence hard-wrap findings in changed files.
 
 ### 1.5 Event bus end-to-end smoke
@@ -73,7 +75,7 @@ Format: symptom → diagnose → resolve.
 
 ### 3.1 Suite state vs the recorded baseline
 
-- Symptom: everything green — that is the recorded baseline; no action.
+- Symptom: everything green — that is the recorded baseline; `make check` covers vet, tests, module tidiness (`go mod tidy -diff`), and gofmt cleanliness; no action.
 - Symptom: failures or hangs confined to `internal/runner/docker_test.go` — run `docker info` first; a stopped daemon fails those tests for infra reasons, not code reasons.
 - Symptom: any other failure — regression; fix before commit.
 

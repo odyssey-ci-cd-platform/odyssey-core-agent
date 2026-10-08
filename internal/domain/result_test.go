@@ -24,6 +24,11 @@ func TestStepResultStatus(t *testing.T) {
 			r:    domain.StepResult{ExitCode: domain.ExitFailure},
 			want: domain.StatusFailed,
 		},
+		{
+			name: "infrastructure fault returns errored regardless of exit code",
+			r:    domain.StepResult{ExitCode: domain.ExitNone, Err: errors.New("exec failed")},
+			want: domain.StatusErrored,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -215,46 +220,11 @@ func TestStageResultStatus(t *testing.T) {
 }
 
 func TestStageResultDuration(t *testing.T) {
-	tests := []struct {
-		name string
-		r    domain.StageResult
-		want time.Duration
-	}{
-		{
-			name: "no jobs returns zero",
-			r:    domain.StageResult{},
-			want: 0,
-		},
-		{
-			name: "sums job durations",
-			r: domain.StageResult{
-				JobResults: []domain.JobResult{
-					{StepResults: []domain.StepResult{{Duration: 1 * time.Second}}},
-					{StepResults: []domain.StepResult{
-						{Duration: 2 * time.Second},
-						{Duration: 500 * time.Millisecond},
-					}},
-				},
-			},
-			want: 3500 * time.Millisecond,
-		},
-		{
-			name: "single job returns its duration",
-			r: domain.StageResult{
-				JobResults: []domain.JobResult{
-					{StepResults: []domain.StepResult{{Duration: 5 * time.Second}}},
-				},
-			},
-			want: 5 * time.Second,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.r.Duration()
-			if got != tt.want {
-				t.Errorf("Duration() = %v, want %v", got, tt.want)
-			}
-		})
+	// Duration is a wall-clock field the orchestrator measures (AUD-009);
+	// it is no longer computed by summing concurrent jobs.
+	r := domain.StageResult{Duration: 1500 * time.Millisecond}
+	if r.Duration != 1500*time.Millisecond {
+		t.Errorf("Duration = %v, want the measured field value", r.Duration)
 	}
 }
 
@@ -331,45 +301,10 @@ func TestPipelineResultStatus(t *testing.T) {
 }
 
 func TestPipelineResultDuration(t *testing.T) {
-	tests := []struct {
-		name string
-		r    domain.PipelineResult
-		want time.Duration
-	}{
-		{
-			name: "no stages returns zero",
-			r:    domain.PipelineResult{},
-			want: 0,
-		},
-		{
-			name: "sums stage durations",
-			r: domain.PipelineResult{
-				StageResults: []domain.StageResult{
-					{JobResults: []domain.JobResult{{StepResults: []domain.StepResult{{Duration: 1 * time.Second}}}}},
-					{JobResults: []domain.JobResult{{StepResults: []domain.StepResult{
-						{Duration: 2 * time.Second},
-						{Duration: 1500 * time.Millisecond},
-					}}}},
-				},
-			},
-			want: 4500 * time.Millisecond,
-		},
-		{
-			name: "single stage returns its duration",
-			r: domain.PipelineResult{
-				StageResults: []domain.StageResult{
-					{JobResults: []domain.JobResult{{StepResults: []domain.StepResult{{Duration: 10 * time.Second}}}}},
-				},
-			},
-			want: 10 * time.Second,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.r.Duration()
-			if got != tt.want {
-				t.Errorf("Duration() = %v, want %v", got, tt.want)
-			}
-		})
+	// Duration is a wall-clock field the orchestrator measures (AUD-009);
+	// it is no longer computed by summing concurrent stages.
+	r := domain.PipelineResult{Duration: 2 * time.Second}
+	if r.Duration != 2*time.Second {
+		t.Errorf("Duration = %v, want the measured field value", r.Duration)
 	}
 }

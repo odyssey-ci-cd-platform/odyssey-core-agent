@@ -23,4 +23,7 @@ type ExitCode int
 const (
 	ExitSuccess ExitCode = iota
 	ExitFailure
+	// ExitNone marks a step whose process never produced an exit code — an
+	// infrastructure fault, not a process result.
+	ExitNone ExitCode = -1
 )

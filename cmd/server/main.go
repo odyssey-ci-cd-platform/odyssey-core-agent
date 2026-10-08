@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -15,8 +14,20 @@ import (
 	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/bus"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/orchestrator"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/runner"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/server"
 )
+
+// listenAddr returns the address the gRPC server binds. It defaults to
+// localhost so an unconfigured server is not reachable from the network;
+// ODYSSEY_ADDR is used verbatim, so both ":6000" and "host:6000" work
+// (AUD-005).
+func listenAddr(env string) string {
+	if env != "" {
+		return env
+	}
+	return "localhost:50051"
+}
 
 func main() {
 	logger := newLogger()
@@ -25,10 +36,7 @@ func main() {
 		logger.Warn(".env file not found, skipping", "error", err)
 	}
 
-	addr := ":50051"
-	if v := os.Getenv("ODYSSEY_ADDR"); v != "" {
-		addr = fmt.Sprintf(":%s", v)
-	}
+	addr := listenAddr(os.Getenv("ODYSSEY_ADDR"))
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -48,8 +56,17 @@ func main() {
 		logger.Info("event bus disabled", "hint", "set ODYSSEY_REDIS_ADDR to enable")
 	}
 
+	// The runner is process-scoped: one client for the server's lifetime,
+	// closed on shutdown (AUD-014).
+	dockerRunner, err := runner.NewDockerRunner(logger)
+	if err != nil {
+		logger.Error("failed to create docker runner", "error", err)
+		os.Exit(1)
+	}
+	defer dockerRunner.Close()
+
 	grpcServer := grpc.NewServer()
-	odysseyv1.RegisterOdysseyServiceServer(grpcServer, &server.Server{Logger: logger, Events: events})
+	odysseyv1.RegisterOdysseyServiceServer(grpcServer, &server.Server{Logger: logger, Events: events, Runner: dockerRunner})
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)
@@ -81,9 +98,9 @@ func newLogger() *slog.Logger {
 
 	opts := &slog.HandlerOptions{Level: level}
 
-	if logFormat := os.Getenv("ODYSSEY_LOG_FORMAT"); logFormat == "json" {
-		return slog.New(slog.NewJSONHandler(os.Stdout, opts))
-	} else {
-		return slog.New(slog.NewTextHandler(os.Stderr, opts))
+	// Both formats log to stderr; stdout stays reserved for data.
+	if os.Getenv("ODYSSEY_LOG_FORMAT") == "json" {
+		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
 	}
+	return slog.New(slog.NewTextHandler(os.Stderr, opts))
 }

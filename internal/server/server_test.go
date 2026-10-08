@@ -1,3 +1,7 @@
+// Internal test package (exception to the external-package convention):
+// the proto mapping functions under test are unexported by design (the
+// mapping is a server-internal concern), so the assertions must live
+// inside the package (AUD-017 disposition).
 package server
 
 import (
@@ -10,6 +14,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
@@ -105,6 +110,38 @@ func TestDomainStatusToProto(t *testing.T) {
 	}
 }
 
+// TestRunPipelineRequiresInjectedRunner asserts a missing Runner is a
+// configuration error — the server no longer builds a DockerRunner per
+// request, which leaked a client on every call (AUD-014).
+func TestRunPipelineRequiresInjectedRunner(t *testing.T) {
+	s := &Server{}
+	dir := t.TempDir()
+	odysseyDir := filepath.Join(dir, ".odyssey")
+	if err := os.MkdirAll(odysseyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pipelineTOML := `[pipeline]
+name = "ci"
+stages = ["build"]
+
+[jobs.compile]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo hi" }]
+`
+	if err := os.WriteFile(filepath.Join(odysseyDir, "pipeline.toml"), []byte(pipelineTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := s.RunPipeline(context.Background(), &odysseyv1.RunPipelineRequest{ProjectPath: dir})
+	if status.Code(err) != codes.Internal {
+		t.Errorf("code = %v, want Internal", status.Code(err))
+	}
+	if resp != nil && resp.PipelineName != "" {
+		t.Errorf("expected an empty response, got pipeline %q", resp.PipelineName)
+	}
+}
+
 func TestDomainStepResultToProto(t *testing.T) {
 	tests := []struct {
 		name string
@@ -116,7 +153,7 @@ func TestDomainStepResultToProto(t *testing.T) {
 			r:    domain.StepResult{StepName: "build", Stdout: "compiled", ExitCode: domain.ExitSuccess},
 			want: &odysseyv1.StepResult{
 				StepName: "build",
-				Output:   "compiled",
+				Stdout:   "compiled",
 				ExitCode: 0,
 				Status:   odysseyv1.Status_STATUS_PASSED,
 			},
@@ -126,19 +163,41 @@ func TestDomainStepResultToProto(t *testing.T) {
 			r:    domain.StepResult{StepName: "test", Stderr: "assertion failed", ExitCode: domain.ExitFailure},
 			want: &odysseyv1.StepResult{
 				StepName: "test",
-				Output:   "\nassertion failed",
+				Stderr:   "assertion failed",
 				ExitCode: 1,
 				Status:   odysseyv1.Status_STATUS_FAILED,
 			},
 		},
 		{
-			name: "step with stdout and stderr combines both",
+			name: "step with stdout and stderr keeps the streams separate",
 			r:    domain.StepResult{StepName: "lint", Stdout: "ok", Stderr: "warning", ExitCode: domain.ExitSuccess},
 			want: &odysseyv1.StepResult{
 				StepName: "lint",
-				Output:   "ok\nwarning",
+				Stdout:   "ok",
+				Stderr:   "warning",
 				ExitCode: 0,
 				Status:   odysseyv1.Status_STATUS_PASSED,
+			},
+		},
+		{
+			name: "infrastructure fault carries the error text and no fabricated output",
+			r:    domain.StepResult{StepName: "build", ExitCode: domain.ExitNone, Err: errors.New("exec failed")},
+			want: &odysseyv1.StepResult{
+				StepName: "build",
+				Error:    "exec failed",
+				ExitCode: -1,
+				Status:   odysseyv1.Status_STATUS_ERRORED,
+			},
+		},
+		{
+			name: "duration round-trips in milliseconds",
+			r:    domain.StepResult{StepName: "build", Stdout: "ok", ExitCode: domain.ExitSuccess, Duration: 1500 * time.Millisecond},
+			want: &odysseyv1.StepResult{
+				StepName:   "build",
+				Stdout:     "ok",
+				ExitCode:   0,
+				Status:     odysseyv1.Status_STATUS_PASSED,
+				DurationMs: 1500,
 			},
 		},
 	}
@@ -148,14 +207,23 @@ func TestDomainStepResultToProto(t *testing.T) {
 			if got.StepName != tt.want.StepName {
 				t.Errorf("StepName = %q, want %q", got.StepName, tt.want.StepName)
 			}
-			if got.Output != tt.want.Output {
-				t.Errorf("Output = %q, want %q", got.Output, tt.want.Output)
+			if got.Stdout != tt.want.Stdout {
+				t.Errorf("Stdout = %q, want %q", got.Stdout, tt.want.Stdout)
+			}
+			if got.Stderr != tt.want.Stderr {
+				t.Errorf("Stderr = %q, want %q", got.Stderr, tt.want.Stderr)
+			}
+			if got.Error != tt.want.Error {
+				t.Errorf("Error = %q, want %q", got.Error, tt.want.Error)
 			}
 			if got.ExitCode != tt.want.ExitCode {
 				t.Errorf("ExitCode = %d, want %d", got.ExitCode, tt.want.ExitCode)
 			}
 			if got.Status != tt.want.Status {
 				t.Errorf("Status = %v, want %v", got.Status, tt.want.Status)
+			}
+			if got.DurationMs != tt.want.DurationMs {
+				t.Errorf("DurationMs = %d, want %d", got.DurationMs, tt.want.DurationMs)
 			}
 		})
 	}

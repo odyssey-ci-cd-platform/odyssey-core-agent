@@ -9,10 +9,17 @@ type StepResult struct {
 	Stderr   string
 	ExitCode ExitCode
 	Duration time.Duration
+	// Err carries an infrastructure fault (exec or env read failure) as
+	// opposed to a process failure, which is a non-zero ExitCode.
+	Err error
 }
 
-// Status returns Passed if the step exited successfully, else Failed
+// Status returns Errored if the step hit an infrastructure fault, Passed if
+// the process exited successfully, else Failed.
 func (r StepResult) Status() Status {
+	if r.Err != nil {
+		return StatusErrored
+	}
 	if r.ExitCode == ExitSuccess {
 		return StatusPassed
 	}
@@ -27,9 +34,10 @@ type JobResult struct {
 }
 
 // Status returns:
-//   - StatusError if the job's setup failed before steps could run
+//   - StatusErrored if the job's setup failed or any step hit an
+//     infrastructure fault
 //   - StatusPending if there are no steps and no setup error
-//   - StatusFailed if any step failed
+//   - StatusFailed if any step's process exited non-zero
 //   - StatusPassed if all steps passed
 func (r JobResult) Status() Status {
 	if r.SetupErr != nil {
@@ -38,15 +46,15 @@ func (r JobResult) Status() Status {
 	if len(r.StepResults) == 0 {
 		return StatusPending
 	}
+	worst := StatusPassed
 	for _, sr := range r.StepResults {
-		if sr.Status() == StatusFailed {
-			return StatusFailed
-		}
+		worst = worstStatus(worst, sr.Status())
 	}
-	return StatusPassed
+	return worst
 }
 
-// Duration returns time taken (time.Duration) for the job to complete
+// Duration returns the sum of its steps' durations. Steps run
+// sequentially, so the sum is the job's wall time.
 func (r JobResult) Duration() time.Duration {
 	if len(r.StepResults) == 0 {
 		return 0
@@ -62,6 +70,10 @@ func (r JobResult) Duration() time.Duration {
 type StageResult struct {
 	StageName  string
 	JobResults []JobResult
+	// Duration is the stage's wall-clock time, measured by the orchestrator
+	// around the whole stage — jobs run concurrently, so a sum would be
+	// wrong (AUD-009).
+	Duration time.Duration
 }
 
 // Status returns the worst status among all jobs, in precedence order
@@ -77,20 +89,14 @@ func (r StageResult) Status() Status {
 	return worst
 }
 
-// Duration returns time taken (time.Duration) for the stage to complete
-func (r StageResult) Duration() time.Duration {
-	if len(r.JobResults) == 0 {
-		return 0
-	}
-	stageDuration := time.Duration(0)
-	for _, jr := range r.JobResults {
-		stageDuration += jr.Duration()
-	}
-	return stageDuration
-}
-
 // PipelineResult holds the results of all stages within a pipeline.
 type PipelineResult struct {
+	// RunID identifies the run that produced this result (AUD-012).
+	RunID string
+	// Duration is the run's wall-clock time, measured by the orchestrator
+	// around the whole run (AUD-009).
+	Duration time.Duration
+
 	PipelineName string
 	StageResults []StageResult
 }
@@ -108,31 +114,28 @@ func (r PipelineResult) Status() Status {
 	return worst
 }
 
-// Duration returns time taken (time.Duration) for the Pipeline to complete
-func (r PipelineResult) Duration() time.Duration {
-	if len(r.StageResults) == 0 {
-		return 0
-	}
-	pipelineDuration := time.Duration(0)
-	for _, sr := range r.StageResults {
-		pipelineDuration += sr.Duration()
-	}
-	return pipelineDuration
-}
-
 // statusRank gives each Status a precedence for aggregation purposes:
-// Error is worst, then Failed, then Pending, then Passed is best.
+// Errored is worst, then Failed, then Unknown, then Running, then Pending,
+// then Skipped, then Passed is best. Every status is ranked explicitly so
+// a future status cannot silently aggregate as healthy (AUD-010).
 func statusRank(s Status) int {
 	switch s {
 	case StatusErrored:
-		return 3
+		return 6
 	case StatusFailed:
-		return 2
+		return 5
+	case StatusUnknown:
+		return 4
+	case StatusRunning:
+		return 3
 	case StatusPending:
+		return 2
+	case StatusSkipped:
 		return 1
-	default: // StatusPassed
+	case StatusPassed:
 		return 0
 	}
+	return 0
 }
 
 // worstStatus returns whichever of a, b ranks worse per statusRank.

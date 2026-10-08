@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,6 +31,110 @@ func writeOdysseyConfig(t *testing.T, dir, pipelineContent, envContent string) {
 	}
 }
 
+// TestLoadRejectsUnknownKeys asserts a typo'd configuration key fails the
+// load naming the key, instead of being silently ignored (AUD-006).
+func TestLoadRejectsUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	writeOdysseyConfig(t, dir, `[pipeline]
+name = "ci"
+stages = ["build"]
+
+[jobs.compile]
+stage = "build"
+image = "alpine:latest"
+
+[[jobs.compile.steps]]
+name = "run"
+run = "echo hi"
+timout = 500
+`, "")
+
+	_, err := config.Load(dir)
+	if err == nil {
+		t.Fatal("Load() expected an error for an unknown key, got nil")
+	}
+	if !strings.Contains(err.Error(), "timout") {
+		t.Errorf("error should name the unknown key, got: %v", err)
+	}
+}
+
+// TestLoadRejectsStageWithoutJobs asserts a declared stage with no jobs
+// fails validation instead of leaving the pipeline Pending forever (AUD-007).
+func TestLoadRejectsStageWithoutJobs(t *testing.T) {
+	dir := t.TempDir()
+	writeOdysseyConfig(t, dir, `[pipeline]
+name = "ci"
+stages = ["build", "test"]
+
+[jobs.compile]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo hi" }]
+`, "")
+
+	_, err := config.Load(dir)
+	if err == nil {
+		t.Fatal("Load() expected an error for a stage with no jobs, got nil")
+	}
+	if !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "no jobs") {
+		t.Errorf("error should name the empty stage, got: %v", err)
+	}
+}
+
+// TestLoadJobOrderIsDeterministic asserts jobs within a stage come back in
+// a stable order (sorted by key) regardless of map iteration (AUD-008).
+func TestLoadJobOrderIsDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	writeOdysseyConfig(t, dir, `[pipeline]
+name = "ci"
+stages = ["build"]
+
+[jobs.zebra]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo zebra" }]
+
+[jobs.aardvark]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo aardvark" }]
+`, "")
+
+	pipeline, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	got := []string{pipeline.Stages[0].Jobs[0].Name, pipeline.Stages[0].Jobs[1].Name}
+	want := []string{"aardvark", "zebra"}
+	if !slices.Equal(got, want) {
+		t.Errorf("job order = %v, want sorted %v", got, want)
+	}
+}
+
+// TestLoadRejectsNegativeStepTimeout asserts a negative step timeout fails
+// validation — the unit is milliseconds and negatives are meaningless
+// (AUD-011).
+func TestLoadRejectsNegativeStepTimeout(t *testing.T) {
+	dir := t.TempDir()
+	writeOdysseyConfig(t, dir, `[pipeline]
+name = "ci"
+stages = ["build"]
+
+[jobs.compile]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo hi", timeout = -5 }]
+`, "")
+
+	_, err := config.Load(dir)
+	if err == nil {
+		t.Fatal("Load() expected an error for a negative timeout, got nil")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("error should mention the timeout, got: %v", err)
+	}
+}
+
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -47,7 +152,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -81,7 +185,6 @@ name = "full-ci"
 stages = ["build", "test", "deploy"]
 
 [jobs.compile]
-name = "compile"
 stage = "build"
 image = "golang:1.21"
 steps = [
@@ -89,7 +192,6 @@ steps = [
 ]
 
 [jobs.unit-tests]
-name = "unit-tests"
 stage = "test"
 image = "golang:1.21"
 setup = ["go mod download"]
@@ -100,7 +202,6 @@ steps = [
 ]
 
 [jobs.deploy-app]
-name = "deploy-app"
 stage = "deploy"
 image = "alpine:latest"
 steps = [
@@ -162,7 +263,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 env = { FOO = "job-value", BAR = "from-job" }
@@ -206,7 +306,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -244,7 +343,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -278,7 +376,6 @@ name = "ci"
 stages = []
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -296,7 +393,6 @@ name = "ci"
 stages = ["test", "test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -324,7 +420,6 @@ name = "ci"
 stages = ["build"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -342,7 +437,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = ""
 image = "alpine:latest"
 steps = [
@@ -360,7 +454,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = ""
 steps = [
@@ -378,7 +471,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = []
@@ -394,7 +486,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -412,7 +503,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -460,7 +550,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = ""
 steps = []

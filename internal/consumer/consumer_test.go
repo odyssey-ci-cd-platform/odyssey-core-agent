@@ -310,3 +310,197 @@ func TestConsumerNewValidatesOptions(t *testing.T) {
 		t.Error("New with nil handler: want error, got nil")
 	}
 }
+
+// TestConsumerDeadLettersMalformedImmediately asserts an entry whose
+// envelope can never parse lands in odyssey:dead on first sight instead of
+// cycling through MaxAttempts claims (AUD-013).
+func TestConsumerDeadLettersMalformedImmediately(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	ctx := context.Background()
+	// Raw entry: the envelope value is not JSON, so handling can never
+	// succeed. Default MinIdle (5m) means the old claim-cycle path would
+	// take about 25 minutes to dead-letter it.
+	if err := client.XAdd(ctx, &redis.XAddArgs{
+		Stream: bus.StreamEvents,
+		Values: map[string]any{"envelope": "{not json"},
+	}).Err(); err != nil {
+		t.Fatalf("XAdd: %v", err)
+	}
+
+	handler := func(context.Context, domain.Event) error { return nil }
+	c, err := consumer.New(client, handler, consumer.Options{
+		Group: "svc", Consumer: "c1", Block: 50 * time.Millisecond,
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	runErr := make(chan error, 1)
+	go func() { runErr <- c.Run(runCtx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		n, err := client.XLen(ctx, bus.StreamDead).Result()
+		if err == nil && n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("malformed entry not dead-lettered within 2s (dead len err: %v)", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	pending, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{
+		Stream: bus.StreamEvents, Group: "svc", Start: "-", End: "+", Count: 10,
+	}).Result()
+	if err != nil {
+		t.Fatalf("XPendingExt: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending entries after immediate dead-letter = %d, want 0", len(pending))
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("Run returned error on shutdown: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not stop after context cancel")
+	}
+}
+
+// countingClient fails the first three XReadGroup calls, then delegates,
+// counting every read to expose hot-looping (AUD-013).
+type countingClient struct {
+	redis.UniversalClient
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *countingClient) XReadGroup(ctx context.Context, a *redis.XReadGroupArgs) *redis.XStreamSliceCmd {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	// Every read fails: the point is to expose what the error path does —
+	// hot-loop or back off (AUD-013).
+	cmd := redis.NewXStreamSliceCmd(ctx)
+	cmd.SetErr(errors.New("redis unavailable"))
+	return cmd
+}
+
+func (c *countingClient) readCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+// TestConsumerBacksOffWhenRedisUnavailable asserts read errors back off
+// instead of hot-looping (AUD-013): a 300ms window must yield a handful of
+// read attempts, not hundreds.
+func TestConsumerBacksOffWhenRedisUnavailable(t *testing.T) {
+	mr := miniredis.RunT(t)
+	cc := &countingClient{UniversalClient: redis.NewClient(&redis.Options{Addr: mr.Addr()})}
+	ctx := context.Background()
+
+	handler := func(context.Context, domain.Event) error { return nil }
+	c, err := consumer.New(cc, handler, consumer.Options{
+		Group: "svc", Consumer: "c1", Block: 50 * time.Millisecond,
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	_ = c.Run(runCtx)
+
+	if calls := cc.readCalls(); calls > 20 {
+		t.Errorf("XReadGroup attempted %d times in 300ms — read errors hot-loop", calls)
+	}
+}
+
+// TestConsumerRecoveryWalksBeyondFirstPage asserts recovery reaches every
+// pending entry — the old pass inspected only the first 64 (AUD-013).
+func TestConsumerRecoveryWalksBeyondFirstPage(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	ctx := context.Background()
+
+	const total = 70
+	for i := 0; i < total; i++ {
+		publish(t, client, domain.Event{Type: "test.recovery", Pipeline: "p"})
+	}
+
+	fail := true
+	handler := func(context.Context, domain.Event) error {
+		if fail {
+			return errors.New("not yet")
+		}
+		return nil
+	}
+	c, err := consumer.New(client, handler, consumer.Options{
+		Group: "svc", Consumer: "c1",
+		MinIdle: time.Millisecond, MaxAttempts: 1000, Block: 20 * time.Millisecond,
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	runErr := make(chan error, 1)
+	go func() { runErr <- c.Run(runCtx) }()
+
+	// Wait until the consumer has created the group and delivered the
+	// entries before measuring recovery.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{
+			Stream: bus.StreamEvents, Group: "svc", Start: "-", End: "+", Count: 200,
+		}).Result()
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("consumer group never appeared: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Give recovery passes time to touch all entries, including those
+	// beyond the first 64.
+	retried := 0
+	for time.Now().Before(deadline) {
+		pending, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{
+			Stream: bus.StreamEvents, Group: "svc", Start: "-", End: "+", Count: 200,
+		}).Result()
+		if err != nil {
+			t.Fatalf("XPendingExt: %v", err)
+		}
+		retried = 0
+		for _, p := range pending {
+			if p.RetryCount >= 2 {
+				retried++
+			}
+		}
+		if retried == total {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if retried != total {
+		t.Errorf("only %d of %d entries were retried past the first delivery — recovery stops at the 64-entry page", retried, total)
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("Run returned error on shutdown: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not stop after context cancel")
+	}
+}

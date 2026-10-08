@@ -2,6 +2,7 @@ package runner_test
 
 import (
 	"context"
+	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -50,10 +51,9 @@ func TestDockerRunnerEmitsStepEvents(t *testing.T) {
 	sink := &recordingSink{}
 
 	result, err := r.Run(context.Background(), job, dir, sink)
-	// Repo contract (TestDockerRunnerRunFailingCommand): a failing command
-	// returns an error in addition to the failed step result.
-	if err == nil {
-		t.Fatal("Run: want error for the failing second step")
+	// AUD-003: the failing second step is a process exit, not an error.
+	if err != nil {
+		t.Fatalf("Run: unexpected error for the failing second step: %v", err)
 	}
 	if result.Status() != domain.StatusFailed {
 		t.Fatalf("job status = %v, want failed (second step fails)", result.Status())
@@ -105,7 +105,9 @@ func TestNewDockerRunner(t *testing.T) {
 }
 
 // requireDocker returns a DockerRunner, skipping the test if Docker
-// is not available.
+// is not available. A successful client constructor is not enough — the
+// daemon itself is pinged, so a stopped daemon skips instead of failing
+// or hanging (AUD-017).
 func requireDocker(t *testing.T) *runner.DockerRunner {
 	t.Helper()
 	if testing.Short() {
@@ -115,7 +117,157 @@ func requireDocker(t *testing.T) *runner.DockerRunner {
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
 	}
+	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := r.Ping(pingCtx); err != nil {
+		r.Close()
+		t.Skipf("Docker daemon not reachable: %v", err)
+	}
 	return r
+}
+
+// alpineContainerIDs returns the IDs of the cancel-repro test's containers
+// via the odyssey.job label, running or stopped.
+func alpineContainerIDs(t *testing.T) map[string]bool {
+	t.Helper()
+	out, err := exec.Command("docker", "ps", "-a", "--filter", "label=odyssey.job=cancel-repro", "-q").Output()
+	if err != nil {
+		t.Fatalf("docker ps failed: %v", err)
+	}
+	ids := make(map[string]bool)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			ids[line] = true
+		}
+	}
+	return ids
+}
+
+// TestDockerRunnerCancelledRunRemovesContainer asserts a cancelled run does
+// not leak its container: teardown must outlive the run's context (gh-63,
+// AUD-001). Teardown on a cancelled context races the daemon request, so
+// the leak only appears on some runs — the scenario loops five times.
+func TestDockerRunnerCancelledRunRemovesContainer(t *testing.T) {
+	r := requireDocker(t)
+	before := alpineContainerIDs(t)
+
+	job := domain.Job{
+		Name:  "cancel-repro",
+		Image: "alpine:latest",
+		Steps: []domain.Step{{Name: "hang", Run: "sleep 10"}},
+	}
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			time.Sleep(1200 * time.Millisecond)
+			cancel()
+		}()
+
+		_, err := r.Run(ctx, job, t.TempDir(), nil)
+		if err == nil {
+			t.Error("Run() expected an error when the context is cancelled mid-step")
+		}
+		for id := range alpineContainerIDs(t) {
+			if !before[id] {
+				t.Errorf("cancelled run leaked its container %s", id)
+			}
+		}
+	}
+}
+
+// TestDockerRunnerInfraFailureDuringStepIsErrored asserts an infrastructure
+// fault mid-step (the container vanishing under the running exec) yields
+// StatusErrored — not Failed, which is reserved for process exits (AUD-003).
+func TestDockerRunnerInfraFailureDuringStepIsErrored(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "infra-repro",
+		Image: "alpine:latest",
+		Steps: []domain.Step{{Name: "hang", Run: "sleep 10"}},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	go func() {
+		time.Sleep(2500 * time.Millisecond)
+		out, err := exec.Command("docker", "ps", "-aq", "--filter", "label=odyssey.job=infra-repro").Output()
+		if err != nil {
+			t.Logf("container listing failed (will re-check): %v", err)
+			return
+		}
+		for _, id := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if id == "" {
+				continue
+			}
+			if rmErr := exec.Command("docker", "rm", "-f", id).Run(); rmErr != nil {
+				t.Logf("container removal failed (will re-check): %v", rmErr)
+			}
+		}
+	}()
+
+	result, err := r.Run(ctx, job, dir, nil)
+	if err == nil {
+		t.Fatal("Run() expected an error when the container is removed mid-step, got nil")
+	}
+	if result.Status() != domain.StatusErrored {
+		t.Errorf("expected StatusErrored for an infrastructure fault, got %v", result.Status())
+	}
+	if len(result.StepResults) == 0 {
+		t.Fatal("expected at least one step result")
+	}
+}
+
+// TestDockerRunnerCancelledStepReportsCancellation asserts a parent-context
+// cancellation mid-step is reported as cancelled — not as "timed out after
+// 0ms" (AUD-011).
+func TestDockerRunnerCancelledStepReportsCancellation(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "cancel-report",
+		Image: "alpine:latest",
+		Steps: []domain.Step{{Name: "hang", Run: "sleep 10"}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	sink := &recordingSink{}
+	go func() {
+		// Cancel as soon as the step is actually running — a fixed delay
+		// races container startup under load (AUD-011).
+		deadline := time.After(30 * time.Second)
+		for {
+			for _, e := range sink.recorded() {
+				if e.Type == domain.EventStepStarted {
+					cancel()
+					return
+				}
+			}
+			select {
+			case <-deadline:
+				cancel()
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}()
+
+	result, err := r.Run(ctx, job, dir, sink)
+	if err == nil {
+		t.Fatal("Run() expected an error when the run is cancelled, got nil")
+	}
+	if len(result.StepResults) == 0 {
+		t.Fatal("expected the in-flight step result to be recorded")
+	}
+	sr := result.StepResults[0]
+	if sr.Err == nil {
+		t.Fatal("expected the cancellation on the step result")
+	}
+	if strings.Contains(sr.Err.Error(), "timed out") {
+		t.Errorf("cancellation reported as a timeout: %v", sr.Err)
+	}
 }
 
 func TestDockerRunnerRunEcho(t *testing.T) {
@@ -173,10 +325,10 @@ func TestDockerRunnerRunFailingCommand(t *testing.T) {
 	defer cancel()
 
 	result, err := r.Run(ctx, job, dir, nil)
-	// A failing command must return an error in addition to the failed
-	// step result.
-	if err == nil {
-		t.Error("Run() returned nil error for a failing command")
+	// AUD-003: a non-zero exit is the process's own result — the real exit
+	// code with no run error; the job is Failed, not Errored.
+	if err != nil {
+		t.Fatalf("Run() unexpected error: %v", err)
 	}
 
 	status := result.Status()
@@ -189,8 +341,11 @@ func TestDockerRunnerRunFailingCommand(t *testing.T) {
 	}
 
 	step := result.StepResults[0]
-	if step.ExitCode != domain.ExitFailure {
-		t.Errorf("expected exit failure, got %v", step.ExitCode)
+	if step.ExitCode != domain.ExitCode(42) {
+		t.Errorf("expected the real exit code 42, got %v", step.ExitCode)
+	}
+	if step.Err != nil {
+		t.Errorf("expected no step error for a process failure, got %v", step.Err)
 	}
 }
 
@@ -302,7 +457,7 @@ func TestDockerRunnerExportsEnvBetweenSteps(t *testing.T) {
 		Name:  "export-env-test",
 		Image: "alpine:latest",
 		Steps: []domain.Step{
-			{Name: "export", Run: `echo "SHARED=from-step-one" >> "$ODYSSEY_ENV"`},
+			{Name: "export", Run: `echo "SHARED=from-step-one" >> "$ODYSSEY_ENV_FILE"`},
 			{Name: "consume", Run: "echo $SHARED"},
 		},
 	}
@@ -332,7 +487,7 @@ func TestDockerRunnerExportedEnvOverridesJobEnv(t *testing.T) {
 		Env:   map[string]string{"SHARED": "job-level"},
 		Steps: []domain.Step{
 			{Name: "before override", Run: "echo $SHARED"},
-			{Name: "override", Run: `echo "SHARED=step-level" >> "$ODYSSEY_ENV"`},
+			{Name: "override", Run: `echo "SHARED=step-level" >> "$ODYSSEY_ENV_FILE"`},
 			{Name: "after override", Run: "echo $SHARED"},
 		},
 	}
@@ -455,8 +610,9 @@ func TestDockerRunnerRunExportedEnvReadError(t *testing.T) {
 		Image: "alpine:latest",
 		Steps: []domain.Step{
 			// Removing the env file makes the after-step readExportedEnv fail,
-			// which must surface as a failed step, not a silent pass.
-			{Name: "remove env file", Run: `rm -f "$ODYSSEY_ENV"`},
+			// which is an infrastructure fault and must surface as Errored,
+			// not as a process failure (AUD-003).
+			{Name: "remove env file", Run: `rm -f "$ODYSSEY_ENV_FILE"`},
 		},
 	}
 
@@ -467,8 +623,8 @@ func TestDockerRunnerRunExportedEnvReadError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run() expected an error when the env file can't be read, got nil")
 	}
-	if result.Status() != domain.StatusFailed {
-		t.Errorf("expected StatusFailed, got %v", result.Status())
+	if result.Status() != domain.StatusErrored {
+		t.Errorf("expected StatusErrored, got %v", result.Status())
 	}
 }
 

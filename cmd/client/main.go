@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", "localhost:8080", "gRPC server address")
+	addr := flag.String("addr", "localhost:50051", "gRPC server address")
 	timeout := flag.Duration("timeout", 120*time.Second, "pipeline timeout")
 	flag.Parse()
 
@@ -54,8 +54,14 @@ func main() {
 			for _, step := range job.StepResults {
 				fmt.Printf("      Step: %s  Exit: %d  Status: %s\n",
 					step.StepName, step.ExitCode, step.Status)
-				if step.Output != "" {
-					fmt.Printf("        output: %s\n", step.Output)
+				if step.Stdout != "" {
+					fmt.Printf("        stdout: %s\n", step.Stdout)
+				}
+				if step.Stderr != "" {
+					fmt.Printf("        stderr: %s\n", step.Stderr)
+				}
+				if step.Error != "" {
+					fmt.Printf("        error: %s\n", step.Error)
 				}
 			}
 		}

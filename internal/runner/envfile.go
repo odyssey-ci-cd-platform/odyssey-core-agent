@@ -9,11 +9,11 @@ import (
 // does not survive from one step to the next — only the container filesystem
 // does. To let a step deliberately pass env vars to later steps, its path is
 // exposed via the ODYSSEY_ENV variable: a step appends `KEY=value` lines to
-// that file (e.g. `echo "VERSION=1.2.3" >> "$ODYSSEY_ENV"`) and subsequent
+// that file (e.g. `echo "VERSION=1.2.3" >> "$ODYSSEY_ENV_FILE"`) and subsequent
 // steps receive those vars. Modeled on GitHub Actions' $GITHUB_ENV.
 const (
 	envFilePath = "/tmp/.odyssey_env"
-	envFileVar  = "ODYSSEY_ENV"
+	envFileVar  = "ODYSSEY_ENV_FILE"
 )
 
 // parseEnvFile parses the contents of the env file into a map. Blank lines and

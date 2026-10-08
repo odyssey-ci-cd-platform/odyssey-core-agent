@@ -21,7 +21,6 @@ stages = ["build", "test", "deploy"]
 # Each job is keyed by a unique identifier (e.g. "compile", "unit-tests").
 #
 # Fields:
-#   name     (string, required)   — Human-readable job name.
 #   stage    (string, required)   — Which stage this job belongs to. Must match
 #                                   a name declared in pipeline.stages.
 #   image    (string, required)   — Docker image to run the job in.
@@ -38,14 +37,17 @@ stages = ["build", "test", "deploy"]
 # Each step has:
 #   name     (string, required)   — A label for the step.
 #   run      (string, required)   — Shell command to execute.
+#   timeout  (int, optional)      — Maximum runtime in milliseconds. Zero
+#                                   (the default) means no timeout; negative
+#                                   values are rejected.
 #
 # Passing env vars between steps:
 #   Each step runs in a fresh shell, so `export FOO=bar` in one step is NOT
 #   visible to the next. To deliberately share a value, append a KEY=value
-#   line to the file at $ODYSSEY_ENV; later steps in the same job receive it
+#   line to the file at $ODYSSEY_ENV_FILE; later steps in the same job receive it
 #   as an environment variable (overriding any job-level env of the same
 #   name). Modeled on GitHub Actions' $GITHUB_ENV. Example:
-#       run = "echo \"VERSION=$(cat VERSION)\" >> \"$ODYSSEY_ENV\""
+#       run = "echo \"VERSION=$(cat VERSION)\" >> \"$ODYSSEY_ENV_FILE\""
 #   Nothing is shared automatically — only what a step explicitly writes.
 # ---------------------------------------------------------------------------
 
@@ -60,8 +62,8 @@ setup = [
 ]
 env = { GOOS = "linux", GOARCH = "amd64", CGO_ENABLED = "0" }
 steps = [
-    # Export a value for later steps to consume via $ODYSSEY_ENV.
-    { name = "compute version",   run = "echo \"VERSION=$(git describe --tags --always)\" >> \"$ODYSSEY_ENV\"" },
+    # Export a value for later steps to consume via $ODYSSEY_ENV_FILE.
+    { name = "compute version",   run = "echo \"VERSION=$(git describe --tags --always)\" >> \"$ODYSSEY_ENV_FILE\"" },
     { name = "build binary",      run = "go build -ldflags \"-X main.version=$VERSION\" -o /app/dist/server ./cmd/server" },
     { name = "check binary size", run = "ls -lh /app/dist/server" },
 ]

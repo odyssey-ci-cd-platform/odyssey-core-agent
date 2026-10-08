@@ -18,12 +18,17 @@ import (
 
 const (
 	// defaultMinIdle bounds how long an entry sits unacknowledged before
+	// it may be claimed by another consumer.
 	// another instance claims it (ADR 0001: ~5 minutes).
 	defaultMinIdle = 5 * time.Minute
 
 	// defaultMaxAttempts dead-letters an entry after this many failed
 	// handling attempts (ADR 0001: poison messages go to odyssey:dead).
 	defaultMaxAttempts = 5
+
+	// readBackoff paces retries after a failed read, so a down Redis
+	// cannot hot-loop the consumer (AUD-013).
+	readBackoff = 2 * time.Second
 
 	// defaultBlock paces the XREADGROUP long poll; short enough that a
 	// context cancel stops Run promptly.
@@ -121,6 +126,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 				continue
 			}
 			c.logger.Warn("event read failed", "err", err)
+			// Back off so a down Redis cannot hot-loop the group (AUD-013).
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(readBackoff):
+			}
 			continue
 		}
 		for _, stream := range res {
@@ -142,37 +153,71 @@ func (c *Consumer) ensureGroup(ctx context.Context) error {
 
 // recoverStuck retries entries whose handler failed long enough ago
 // (MinIdle) by claiming them, and dead-letters entries whose attempts are
-// exhausted (ADR 0001). Redis errors are logged, never fatal.
+// exhausted (ADR 0001). The claim scan is cursor-driven, so recovery
+// reaches every pending entry, not just the first page (AUD-013). Redis
+// errors are logged, never fatal.
 func (c *Consumer) recoverStuck(ctx context.Context) {
-	pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{
-		Stream: c.opts.Stream, Group: c.opts.Group, Start: "-", End: "+", Count: 64,
-	}).Result()
-	if err != nil {
-		if ctx.Err() == nil {
-			c.logger.Warn("pending scan failed", "err", err)
-		}
-		return
-	}
-
-	// XAUTOCLAIM bumps each claimed entry's delivery count, which is what
-	// XPENDING reports as the retry count — no separate counter needed.
-	for _, p := range pending {
-		if p.RetryCount >= int64(c.opts.MaxAttempts) {
-			c.deadLetter(ctx, p.ID)
-			continue
-		}
-		claimed, _, err := c.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+	start := "0-0"
+	for {
+		claimed, next, err := c.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 			Stream: c.opts.Stream, Group: c.opts.Group, Consumer: c.opts.Consumer,
-			MinIdle: c.opts.MinIdle, Start: p.ID, Count: 1,
+			MinIdle: c.opts.MinIdle, Start: start, Count: 64,
 		}).Result()
 		if err != nil {
-			c.logger.Warn("entry claim failed", "id", p.ID, "err", err)
-			continue
+			if ctx.Err() == nil {
+				c.logger.Warn("entry claim scan failed", "err", err)
+			}
+			return
 		}
 		for _, msg := range claimed {
-			c.handle(ctx, msg)
+			c.recoverOne(ctx, msg)
 		}
+		if next == "0-0" {
+			return
+		}
+		start = next
 	}
+}
+
+// recoverOne handles one claimed entry: dead-letter it when its attempts
+// are exhausted, else hand it back to the handler. XAUTOCLAIM bumped the
+// delivery count, which XPENDING reports as the retry count — no separate
+// counter needed (ADR 0001).
+func (c *Consumer) recoverOne(ctx context.Context, msg redis.XMessage) {
+	pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{
+		Stream: c.opts.Stream, Group: c.opts.Group, Start: msg.ID, End: msg.ID, Count: 1,
+	}).Result()
+	if err != nil {
+		c.logger.Warn("pending check failed", "id", msg.ID, "err", err)
+		return
+	}
+	// The claim bumped the delivery count, so the count already includes
+	// the delivery being recovered; dead-letter only when handling has
+	// actually exceeded MaxAttempts (gh-76 keeps the three-attempts contract).
+	if len(pending) == 1 && pending[0].RetryCount > int64(c.opts.MaxAttempts) {
+		c.deadLetter(ctx, msg.ID)
+		return
+	}
+	c.handle(ctx, msg)
+}
+
+// deadLetterEntry copies one raw envelope to the dead-letter stream and
+// acknowledges the entry, used for entries that can never succeed
+// (AUD-013). Failures are logged; the entry stays pending and the regular
+// recovery path retries the dead-letter later.
+func (c *Consumer) deadLetterEntry(ctx context.Context, id, raw string) {
+	if err := c.client.XAdd(ctx, &redis.XAddArgs{
+		Stream: bus.StreamDead,
+		Values: map[string]any{"envelope": raw, "source_id": id},
+	}).Err(); err != nil {
+		c.logger.Warn("dead-letter write failed", "id", id, "err", err)
+		return
+	}
+	if err := c.client.XAck(ctx, c.opts.Stream, c.opts.Group, id).Err(); err != nil {
+		c.logger.Warn("dead-letter ack failed", "id", id, "err", err)
+		return
+	}
+	c.logger.Warn("event dead-lettered", "id", id)
 }
 
 // deadLetter copies an exhausted entry's envelope to the dead-letter
@@ -208,12 +253,17 @@ func (c *Consumer) deadLetter(ctx context.Context, id string) {
 func (c *Consumer) handle(ctx context.Context, msg redis.XMessage) {
 	raw, ok := msg.Values["envelope"].(string)
 	if !ok {
+		// An entry with no envelope can never parse; dead-letter it now
+		// instead of cycling claims forever (AUD-013).
 		c.logger.Warn("event envelope missing", "id", msg.ID)
+		c.deadLetterEntry(ctx, msg.ID, "")
 		return
 	}
 	var event domain.Event
 	if err := json.Unmarshal([]byte(raw), &event); err != nil {
+		// Same for an envelope that does not parse (AUD-013).
 		c.logger.Warn("event envelope malformed", "id", msg.ID, "err", err)
+		c.deadLetterEntry(ctx, msg.ID, raw)
 		return
 	}
 	if err := c.handler(ctx, event); err != nil {

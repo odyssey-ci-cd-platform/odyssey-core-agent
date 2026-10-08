@@ -16,10 +16,13 @@ const (
 // The event's id is the Redis stream entry ID assigned by XADD; it is not
 // part of the JSON body.
 type Event struct {
-	Type       string            `json:"type"`
-	OccurredAt time.Time         `json:"occurred_at"`
-	Pipeline   string            `json:"pipeline"`
-	Job        string            `json:"job,omitempty"`
-	Step       string            `json:"step,omitempty"`
-	Payload    map[string]string `json:"payload,omitempty"`
+	Type       string    `json:"type"`
+	OccurredAt time.Time `json:"occurred_at"`
+	// RunID identifies one pipeline run, so consumers can distinguish
+	// concurrent or repeated runs of the same pipeline (AUD-012).
+	RunID    string            `json:"run_id,omitempty"`
+	Pipeline string            `json:"pipeline"`
+	Job      string            `json:"job,omitempty"`
+	Step     string            `json:"step,omitempty"`
+	Payload  map[string]string `json:"payload,omitempty"`
 }

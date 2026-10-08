@@ -106,6 +106,38 @@ func TestDomainStatusToProto(t *testing.T) {
 	}
 }
 
+// TestRunPipelineRequiresInjectedRunner asserts a missing Runner is a
+// configuration error — the server no longer builds a DockerRunner per
+// request, which leaked a client on every call (AUD-014).
+func TestRunPipelineRequiresInjectedRunner(t *testing.T) {
+	s := &Server{}
+	dir := t.TempDir()
+	odysseyDir := filepath.Join(dir, ".odyssey")
+	if err := os.MkdirAll(odysseyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pipelineTOML := `[pipeline]
+name = "ci"
+stages = ["build"]
+
+[jobs.compile]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo hi" }]
+`
+	if err := os.WriteFile(filepath.Join(odysseyDir, "pipeline.toml"), []byte(pipelineTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := s.RunPipeline(context.Background(), &odysseyv1.RunPipelineRequest{ProjectPath: dir})
+	if status.Code(err) != codes.Internal {
+		t.Errorf("code = %v, want Internal", status.Code(err))
+	}
+	if resp != nil && resp.PipelineName != "" {
+		t.Errorf("expected an empty response, got pipeline %q", resp.PipelineName)
+	}
+}
+
 func TestDomainStepResultToProto(t *testing.T) {
 	tests := []struct {
 		name string

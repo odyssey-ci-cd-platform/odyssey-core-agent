@@ -42,6 +42,12 @@ func NewDockerRunner(logger *slog.Logger) (*DockerRunner, error) {
 	return &DockerRunner{client: c, logger: logger}, nil
 }
 
+// Close releases the Docker client's connections. The runner is
+// process-scoped on a server, so Close belongs to shutdown (AUD-014).
+func (r *DockerRunner) Close() error {
+	return r.client.Close()
+}
+
 // loggerFromCtx returns the logger attached to ctx, falling back to the
 // runner's own logger when none is present.
 func (r *DockerRunner) loggerFromCtx(ctx context.Context) *slog.Logger {

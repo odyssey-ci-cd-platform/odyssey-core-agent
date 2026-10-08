@@ -14,6 +14,7 @@ import (
 	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/bus"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/orchestrator"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/runner"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/server"
 )
 
@@ -55,8 +56,17 @@ func main() {
 		logger.Info("event bus disabled", "hint", "set ODYSSEY_REDIS_ADDR to enable")
 	}
 
+	// The runner is process-scoped: one client for the server's lifetime,
+	// closed on shutdown (AUD-014).
+	dockerRunner, err := runner.NewDockerRunner(logger)
+	if err != nil {
+		logger.Error("failed to create docker runner", "error", err)
+		os.Exit(1)
+	}
+	defer dockerRunner.Close()
+
 	grpcServer := grpc.NewServer()
-	odysseyv1.RegisterOdysseyServiceServer(grpcServer, &server.Server{Logger: logger, Events: events})
+	odysseyv1.RegisterOdysseyServiceServer(grpcServer, &server.Server{Logger: logger, Events: events, Runner: dockerRunner})
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)

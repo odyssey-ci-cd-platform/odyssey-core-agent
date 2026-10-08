@@ -16,8 +16,9 @@ import (
 // Server implements the gRPC OdysseyService by wiring together the
 // config loader, runner, and orchestrator.
 //
-// The Runner field may be set to inject a runner implementation for
-// testing. When nil, RunPipeline creates a DockerRunner.
+// The Runner field must be set — the server owns one runner for its
+// lifetime and closes it on shutdown; building one per request leaked a
+// client on every call (AUD-014).
 //
 // Events is the event sink lifecycle events are emitted to. When nil,
 // runs emit nothing (ADR 0001: the engine stays runnable without Redis).
@@ -60,12 +61,8 @@ func (s Server) RunPipeline(ctx context.Context, request *odysseyv1.RunPipelineR
 
 	r := s.Runner
 	if r == nil {
-		dockerRunner, err := runner.NewDockerRunner(logger)
-		if err != nil {
-			logger.Error("runner creation failed", "error", err)
-			return &odysseyv1.RunPipelineResponse{}, status.Errorf(codes.Internal, "could not instantiate runner: %v", err)
-		}
-		r = dockerRunner
+		logger.Error("no runner configured")
+		return &odysseyv1.RunPipelineResponse{}, status.Errorf(codes.Internal, "no runner configured")
 	}
 
 	logger.Info("pipeline started", "pipeline", pipeline.Name)

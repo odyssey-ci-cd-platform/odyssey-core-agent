@@ -24,8 +24,6 @@ func CreateTar(path string) ([]byte, error) {
 	var buffer bytes.Buffer
 	tw := tar.NewWriter(&buffer)
 
-	defer tw.Close()
-
 	err := filepath.WalkDir(path, func(file string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -68,6 +66,11 @@ func CreateTar(path string) ([]byte, error) {
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	// Close flushes the final padding and the end-of-archive blocks, so it
+	// must run before the bytes are read.
+	if err := tw.Close(); err != nil {
 		return nil, err
 	}
 	return buffer.Bytes(), nil

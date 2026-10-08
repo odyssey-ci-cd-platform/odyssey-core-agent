@@ -36,8 +36,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Event bus technology decision record: Redis Streams chosen for v1 (gh-38).
 - Process scaffolding ported from the cubicle project: issue-first workflow with solution-template and PR-link automation, one-shot ship/merge scripts, RUNBOOK.md with recorded baseline, gitignored STATE.md, and a `make check` gate.
 - CI workflow running `make check` on every PR and push to main; branch protection on main requires the `check` status and pull requests.
-### Fixed
-- Step results carry the real process exit code; non-zero exits are no longer reported as infrastructure errors, and infrastructure faults mid-step surface as `StatusErrored` (gh-65).
 
 ### Changed
+- Pipeline TOML files with unknown keys are rejected at load, naming the file and keys; the undocumented job `name` key is gone from the example and fixtures (gh-68).
 - `make check` enforces gofmt cleanliness and module tidiness alongside vet and tests (gh-78).
+
+### Fixed
+- Step results carry the real process exit code; non-zero exits are no longer reported as infrastructure errors, and infrastructure faults mid-step surface as `StatusErrored` (gh-65).

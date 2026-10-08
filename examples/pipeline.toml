@@ -21,7 +21,6 @@ stages = ["build", "test", "deploy"]
 # Each job is keyed by a unique identifier (e.g. "compile", "unit-tests").
 #
 # Fields:
-#   name     (string, required)   — Human-readable job name.
 #   stage    (string, required)   — Which stage this job belongs to. Must match
 #                                   a name declared in pipeline.stages.
 #   image    (string, required)   — Docker image to run the job in.

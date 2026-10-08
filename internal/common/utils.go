@@ -3,19 +3,30 @@ package common
 import (
 	"archive/tar"
 	"bytes"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
 func ReadToml[T any](tomlPath string) (T, error) {
 	var model T
-	_, err := toml.DecodeFile(tomlPath, &model)
+	meta, err := toml.DecodeFile(tomlPath, &model)
 	if err != nil {
 		return model, err
+	}
+	// Unknown keys are contradictions between file and schema; reject them
+	// at parse time instead of silently ignoring them (AUD-006).
+	if undecoded := meta.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, 0, len(undecoded))
+		for _, k := range undecoded {
+			keys = append(keys, k.String())
+		}
+		return model, fmt.Errorf("%s: unknown configuration keys: %s", tomlPath, strings.Join(keys, ", "))
 	}
 	return model, nil
 }

@@ -30,6 +30,35 @@ func writeOdysseyConfig(t *testing.T, dir, pipelineContent, envContent string) {
 	}
 }
 
+// TestLoadRejectsUnknownKeys asserts a typo'd configuration key fails the
+// load naming the key, instead of being silently ignored (AUD-006).
+func TestLoadRejectsUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	writeOdysseyConfig(t, dir, `[pipeline]
+name = "ci"
+stages = ["build"]
+
+[jobs.compile]
+stage = "build"
+image = "alpine:latest"
+
+[[jobs.compile.steps]]
+name = "run"
+run = "echo hi"
+timout = 500
+`, "")
+
+	_, err := config.Load(dir)
+	if err == nil {
+		t.Fatal("Load() expected an error for an unknown key, got nil")
+	}
+	if !strings.Contains(err.Error(), "timout") {
+		t.Errorf("error should name the unknown key, got: %v", err)
+	}
+}
+
+
+
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -47,7 +76,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -81,7 +109,6 @@ name = "full-ci"
 stages = ["build", "test", "deploy"]
 
 [jobs.compile]
-name = "compile"
 stage = "build"
 image = "golang:1.21"
 steps = [
@@ -89,7 +116,6 @@ steps = [
 ]
 
 [jobs.unit-tests]
-name = "unit-tests"
 stage = "test"
 image = "golang:1.21"
 setup = ["go mod download"]
@@ -100,7 +126,6 @@ steps = [
 ]
 
 [jobs.deploy-app]
-name = "deploy-app"
 stage = "deploy"
 image = "alpine:latest"
 steps = [
@@ -162,7 +187,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 env = { FOO = "job-value", BAR = "from-job" }
@@ -206,7 +230,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -244,7 +267,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -278,7 +300,6 @@ name = "ci"
 stages = []
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -296,7 +317,6 @@ name = "ci"
 stages = ["test", "test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -324,7 +344,6 @@ name = "ci"
 stages = ["build"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -342,7 +361,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = ""
 image = "alpine:latest"
 steps = [
@@ -360,7 +378,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = ""
 steps = [
@@ -378,7 +395,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = []
@@ -394,7 +410,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -412,7 +427,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = "alpine:latest"
 steps = [
@@ -460,7 +474,6 @@ name = "ci"
 stages = ["test"]
 
 [jobs.unit]
-name = "unit"
 stage = "test"
 image = ""
 steps = []

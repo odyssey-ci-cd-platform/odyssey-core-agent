@@ -92,3 +92,9 @@ Format: symptom → diagnose → resolve.
 ### 3.4 New incident
 
 Any failure that costs more than a minute to diagnose gets a section here: symptom → diagnose → resolve, three bullets each.
+
+### 3.5 `link` fails: `Could not resolve to an issue or pull request`
+
+- Symptom: a PR's `link` check exits red with a GraphQL "Could not resolve" error; `merge-pr.sh` then refuses to merge, and neither editing the PR body nor `gh run rerun` clears it.
+- Diagnose: the link workflow fires only on `opened` and replays the body snapshot from that event; the body contained an external citation shaped like `repo#123` (e.g. `woodpecker-ci#4368`), the `#<number>` matcher claimed it as a local issue, and the comment on nonexistent issue 4368 failed.
+- Resolve: cite external repos without the `#` ("woodpecker-ci issue 4368") before opening, because a red `link` cannot be repaired in place — close the PR and open a fresh one from the same branch. Fixed at the root in `pr-link-comment.yml` (PR gh-17's results-DB ADR): the matcher now ignores `#<number>` preceded by an alphanumeric, `_`, or `/`, so external `org/repo#123` shapes never link.

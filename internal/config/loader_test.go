@@ -113,6 +113,30 @@ steps = [{ name = "run", run = "echo aardvark" }]
 	}
 }
 
+// TestLoadRejectsNegativeStepTimeout asserts a negative step timeout fails
+// validation — the unit is milliseconds and negatives are meaningless
+// (AUD-011).
+func TestLoadRejectsNegativeStepTimeout(t *testing.T) {
+	dir := t.TempDir()
+	writeOdysseyConfig(t, dir, `[pipeline]
+name = "ci"
+stages = ["build"]
+
+[jobs.compile]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo hi", timeout = -5 }]
+`, "")
+
+	_, err := config.Load(dir)
+	if err == nil {
+		t.Fatal("Load() expected an error for a negative timeout, got nil")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("error should mention the timeout, got: %v", err)
+	}
+}
+
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name         string

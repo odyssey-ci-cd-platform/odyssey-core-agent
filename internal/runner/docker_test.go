@@ -212,6 +212,40 @@ func TestDockerRunnerInfraFailureDuringStepIsErrored(t *testing.T) {
 	}
 }
 
+// TestDockerRunnerCancelledStepReportsCancellation asserts a parent-context
+// cancellation mid-step is reported as cancelled — not as "timed out after
+// 0ms" (AUD-011).
+func TestDockerRunnerCancelledStepReportsCancellation(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "cancel-report",
+		Image: "alpine:latest",
+		Steps: []domain.Step{{Name: "hang", Run: "sleep 10"}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(2500 * time.Millisecond)
+		cancel()
+	}()
+
+	result, err := r.Run(ctx, job, dir, nil)
+	if err == nil {
+		t.Fatal("Run() expected an error when the run is cancelled, got nil")
+	}
+	if len(result.StepResults) == 0 {
+		t.Fatal("expected the in-flight step result to be recorded")
+	}
+	sr := result.StepResults[0]
+	if sr.Err == nil {
+		t.Fatal("expected the cancellation on the step result")
+	}
+	if strings.Contains(sr.Err.Error(), "timed out") {
+		t.Errorf("cancellation reported as a timeout: %v", sr.Err)
+	}
+}
+
 func TestDockerRunnerRunEcho(t *testing.T) {
 	r := requireDocker(t)
 	dir := t.TempDir()

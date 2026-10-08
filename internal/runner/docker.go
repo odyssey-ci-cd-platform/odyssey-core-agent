@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -216,59 +217,53 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 			Stderr   string
 			RunErr   error
 		}
-		stepChan := make(chan stepResult, 1)
 
-		timeoutCtx := ctx
+		stepCtx := ctx
 		var cancel context.CancelFunc
-
 		if step.Timeout > 0 {
-			timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(step.Timeout)*time.Millisecond)
+			stepCtx, cancel = context.WithTimeout(ctx, time.Duration(step.Timeout)*time.Millisecond)
 		}
 
-		go func() {
-			exitCode, stdout, stderr, runErr := r.execCommand(timeoutCtx, containerID, step.Run, envSlice(exported))
-			stepChan <- stepResult{
-				ExitCode: exitCode,
-				Stdout:   stdout,
-				Stderr:   stderr,
-				RunErr:   runErr,
-			}
-		}()
+		// execCommand honors its context, so a step deadline or a run
+		// cancellation surfaces as its error — no goroutine needed (AUD-011).
+		exitCode, stdout, stderr, runErr := r.execCommand(stepCtx, containerID, step.Run, envSlice(exported))
+		if cancel != nil {
+			cancel()
+		}
 
-		select {
-		case <-timeoutCtx.Done():
-			if cancel != nil {
-				cancel()
-			}
+		stepRes := domain.StepResult{
+			StepName: step.Name,
+			Stdout:   stdout,
+			Stderr:   stderr,
+			ExitCode: exitCode,
+			Duration: time.Since(stepStartTime),
+		}
+
+		switch {
+		case runErr != nil && ctx.Err() != nil:
+			// The run itself was cancelled or timed out — the step did not
+			// time out; report the cancellation honestly (AUD-011).
+			stepRes.ExitCode = domain.ExitNone
+			stepRes.Err = fmt.Errorf("run cancelled: %w", ctx.Err())
+			stepResults = append(stepResults, stepRes)
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepRes))
+			return stepResults, ctx.Err()
+		case runErr != nil && step.Timeout > 0 && errors.Is(runErr, context.DeadlineExceeded):
 			timeoutErr := fmt.Errorf("step %s timed out after %dms", step.Name, step.Timeout)
-			r.logger.Error(timeoutErr.Error())
-			stepResults = append(stepResults, domain.StepResult{
-				StepName: step.Name,
-				Stdout:   timeoutErr.Error(),
-				Stderr:   timeoutErr.Error(),
-				ExitCode: domain.ExitFailure,
-				Duration: time.Since(stepStartTime),
-			})
-			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
+			r.loggerFromCtx(ctx).Error(timeoutErr.Error())
+			stepRes.ExitCode = domain.ExitFailure
+			stepResults = append(stepResults, stepRes)
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepRes))
 			return stepResults, timeoutErr
-		case res := <-stepChan:
-			if cancel != nil {
-				cancel()
-			}
-			stepResults = append(stepResults, domain.StepResult{
-				StepName: step.Name,
-				Stdout:   res.Stdout,
-				Stderr:   res.Stderr,
-				ExitCode: res.ExitCode,
-				Duration: time.Since(stepStartTime),
-				Err:      res.RunErr,
-			})
-			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
-			if res.RunErr != nil {
-				r.logger.Error("step %s failed to run: %v", step.Name, res.RunErr)
-				return stepResults, res.RunErr
-			}
+		case runErr != nil:
+			stepRes.Err = runErr
+			stepResults = append(stepResults, stepRes)
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepRes))
+			return stepResults, runErr
 		}
+
+		stepResults = append(stepResults, stepRes)
+		r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepRes))
 
 		// Surface which vars this step exported for later steps. Values are
 		// omitted since they may hold secrets; a future UI can show them.

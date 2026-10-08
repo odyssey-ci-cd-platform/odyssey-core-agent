@@ -37,6 +37,9 @@ stages = ["build", "test", "deploy"]
 # Each step has:
 #   name     (string, required)   — A label for the step.
 #   run      (string, required)   — Shell command to execute.
+#   timeout  (int, optional)      — Maximum runtime in milliseconds. Zero
+#                                   (the default) means no timeout; negative
+#                                   values are rejected.
 #
 # Passing env vars between steps:
 #   Each step runs in a fresh shell, so `export FOO=bar` in one step is NOT

@@ -47,3 +47,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Step results carry the real process exit code; non-zero exits are no longer reported as infrastructure errors, and infrastructure faults mid-step surface as `StatusErrored` (gh-65).
 - Status aggregation ranks every status explicitly; Running, Skipped, and Unknown no longer rank as Passed (gh-72).
 - Stage, pipeline, and run durations are wall-clock measurements by the orchestrator instead of sums over concurrent work (gh-71).
+- Step timeouts are validated milliseconds, documented in the example, and parent-cancellation is no longer reported as a step timeout; the goroutine/channel/select around step execution is gone (gh-73).

@@ -7,9 +7,11 @@ import (
 
 // StepConfig represents a single step in a job as defined in pipeline.toml.
 type StepConfig struct {
-	Name    string `toml:"name"`
-	Run     string `toml:"run"`
-	Timeout int    `toml:"timeout"`
+	Name string `toml:"name"`
+	Run  string `toml:"run"`
+	// Timeout is the step's maximum runtime in milliseconds. Zero means no
+	// timeout; negative values are rejected at validation (AUD-011).
+	Timeout int `toml:"timeout"`
 }
 
 // JobConfig represents a job as defined in pipeline.toml.
@@ -80,6 +82,9 @@ func (root RootConfig) Validate() error {
 			}
 			if step.Run == "" {
 				errs = append(errs, fmt.Errorf("job %q: step %d (%q): run must not be empty", jobName, stepNumber+1, step.Name))
+			}
+			if step.Timeout < 0 {
+				errs = append(errs, fmt.Errorf("job %q: step %d (%q): timeout must not be negative (milliseconds)", jobName, stepNumber+1, step.Name))
 			}
 		}
 	}

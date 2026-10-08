@@ -56,6 +56,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code-level slips: structured logging replaces printf-style slog calls, the unused LocalRunner is removed, the client default address matches the server, the env-file variable is renamed to `ODYSSEY_ENV_FILE` so `ODYSSEY_ENV` alone means the log switch, the proto enum reserves the skipped field 6, status mapping switches on status values, and both log formats write to stderr (gh-79).
 - Workflow automation: the issue template carries only problem, outcomes, and constraints; `ship-pr.sh` derives the issue only from feature/N branches, cleans its temp body, and polls for checks instead of a fixed sleep; the PR-link workflow links only closing references (gh-80).
 - Documentation drift repaired: stale `README.org` removed, README corrected (`.odyssey` path, `StatusErrored`, the actual container model, Go 1.26, decision-first event-bus wording), and the example documents step timeouts (gh-81).
+- The agent rulebook (`AGENTS.md`, `.agents/`) is version-controlled and CI runs the docs check on every PR; the checker now counts violations (it previously printed findings but always exited zero) and skips YAML frontmatter (gh-83).
 ### Security
 - The gRPC server binds localhost by default, honors a verbatim `ODYSSEY_ADDR`, and confines `project_path` under `ODYSSEY_PROJECT_ROOT` when set (gh-74).
 

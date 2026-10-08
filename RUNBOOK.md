@@ -46,6 +46,8 @@ Verify: PR merged, branch gone on both ends. `make check` on main matches the re
 
 1. Run `.agents/bin/check-docs.sh` before committing modified Markdown.
 
+CI runs the same check on every PR (the script and the rulebook are version-controlled), so a red docs check blocks merge the same as the test gate.
+
 Verify: no mid-sentence hard-wrap findings in changed files.
 
 ### 1.5 Event bus end-to-end smoke

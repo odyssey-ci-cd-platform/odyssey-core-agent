@@ -9,9 +9,12 @@ import (
 	"syscall"
 
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 
 	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/bus"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/orchestrator"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/server"
 )
 
@@ -33,8 +36,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ADR 0001: the event bus is optional; the engine stays runnable
+	// without Redis. Publish failures surface per event, logged never fatal.
+	var events orchestrator.EventSink
+	if redisAddr := os.Getenv("ODYSSEY_REDIS_ADDR"); redisAddr != "" {
+		redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
+		defer redisClient.Close()
+		events = bus.New(redisClient)
+		logger.Info("event bus enabled", "redis", redisAddr)
+	} else {
+		logger.Info("event bus disabled", "hint", "set ODYSSEY_REDIS_ADDR to enable")
+	}
+
 	grpcServer := grpc.NewServer()
-	odysseyv1.RegisterOdysseyServiceServer(grpcServer, &server.Server{Logger: logger})
+	odysseyv1.RegisterOdysseyServiceServer(grpcServer, &server.Server{Logger: logger, Events: events})
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)

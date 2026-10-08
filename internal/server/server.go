@@ -18,11 +18,15 @@ import (
 // The Runner field may be set to inject a runner implementation for
 // testing. When nil, RunPipeline creates a DockerRunner.
 //
+// Events is the event sink lifecycle events are emitted to. When nil,
+// runs emit nothing (ADR 0001: the engine stays runnable without Redis).
+//
 // Logger is the root logger passed down to the orchestrator and runner.
 // When nil, a no-op logger is used.
 type Server struct {
 	odysseyv1.UnimplementedOdysseyServiceServer
 	Runner runner.Runner
+	Events orchestrator.EventSink
 	Logger *slog.Logger
 }
 
@@ -57,7 +61,7 @@ func (s Server) RunPipeline(ctx context.Context, request *odysseyv1.RunPipelineR
 	}
 
 	logger.Info("pipeline started", "pipeline", pipeline.Name)
-	orch := orchestrator.New(r, nil, logger)
+	orch := orchestrator.New(r, s.Events, logger)
 
 	pipelineResult, _ := orch.Run(ctx, pipeline, request.ProjectPath)
 	response := domainPipelineResultToProto(pipelineResult)

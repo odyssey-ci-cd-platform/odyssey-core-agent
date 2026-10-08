@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- Hosted gRPC runs emit lifecycle events to the event bus when `ODYSSEY_REDIS_ADDR` is set; without it the server runs with the bus disabled (gh-52).
 - Pipeline and job lifecycle events published to the Redis Streams event bus, with emission failures logged and never fatal (gh-52).
 - Event bus technology decision record: Redis Streams chosen for v1 (gh-38).
 - Process scaffolding ported from the cubicle project: issue-first workflow with solution-template and PR-link automation, one-shot ship/merge scripts, RUNBOOK.md with recorded baseline, gitignored STATE.md, and a `make check` gate.

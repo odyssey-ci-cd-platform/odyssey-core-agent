@@ -54,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Consumer: read errors back off instead of hot-looping, recovery walks every pending entry instead of the first 64, and entries that can never parse dead-letter immediately (gh-76).
 - Docker integration tests ping the daemon and skip cleanly when it is down; tests locking in the old exit-code behavior were rewritten (gh-77).
 - Code-level slips: structured logging replaces printf-style slog calls, the unused LocalRunner is removed, the client default address matches the server, the env-file variable is renamed to `ODYSSEY_ENV_FILE` so `ODYSSEY_ENV` alone means the log switch, the proto enum reserves the skipped field 6, status mapping switches on status values, and both log formats write to stderr (gh-79).
+- Workflow automation: the issue template carries only problem, outcomes, and constraints; `ship-pr.sh` derives the issue only from feature/N branches, cleans its temp body, and polls for checks instead of a fixed sleep; the PR-link workflow links only closing references (gh-80).
 ### Security
 - The gRPC server binds localhost by default, honors a verbatim `ODYSSEY_ADDR`, and confines `project_path` under `ODYSSEY_PROJECT_ROOT` when set (gh-74).
 

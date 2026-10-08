@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- End-to-end event bus smoke script (`scripts/e2e-event-bus.sh`): live Redis in docker, real server and client, asserts the stream contents; documented as RUNBOOK §1.5.
 - Hosted gRPC runs emit lifecycle events to the event bus when `ODYSSEY_REDIS_ADDR` is set; without it the server runs with the bus disabled (gh-52).
 - Pipeline and job lifecycle events published to the Redis Streams event bus, with emission failures logged and never fatal (gh-52).
 - Event bus technology decision record: Redis Streams chosen for v1 (gh-38).

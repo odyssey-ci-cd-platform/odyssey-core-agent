@@ -48,6 +48,16 @@ Verify: PR merged, branch gone on both ends. `make check` on main matches the re
 
 Verify: no mid-sentence hard-wrap findings in changed files.
 
+### 1.5 Event bus end-to-end smoke
+
+1. Run `scripts/e2e-event-bus.sh`.
+
+The script spawns its own Redis (docker, `redis:7-alpine`), starts the server with `ODYSSEY_REDIS_ADDR` pointed at it, triggers one pipeline run through the real gRPC client, and asserts the `odyssey:events` stream holds exactly the four lifecycle events tagged with the fixture pipeline.
+
+Verify: `PASS: 4 lifecycle events for e2e-smoke on odyssey:events` and exit code 0; the script cleans up its container, binaries, and fixture on both pass and fail.
+
+Use it when changing the bus, orchestrator emission, or server wiring — `make check` covers the seams with miniredis, not a live Redis.
+
 ## 2. Maintenance tasks
 
 ### 2.1 Record a decision or status change

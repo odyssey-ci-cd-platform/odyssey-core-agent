@@ -2,6 +2,7 @@ package runner_test
 
 import (
 	"context"
+	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -116,6 +117,55 @@ func requireDocker(t *testing.T) *runner.DockerRunner {
 		t.Skipf("Docker not available: %v", err)
 	}
 	return r
+}
+
+// alpineContainerIDs returns the IDs of the cancel-repro test's containers
+// via the odyssey.job label, running or stopped.
+func alpineContainerIDs(t *testing.T) map[string]bool {
+	t.Helper()
+	out, err := exec.Command("docker", "ps", "-a", "--filter", "label=odyssey.job=cancel-repro", "-q").Output()
+	if err != nil {
+		t.Fatalf("docker ps failed: %v", err)
+	}
+	ids := make(map[string]bool)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			ids[line] = true
+		}
+	}
+	return ids
+}
+
+// TestDockerRunnerCancelledRunRemovesContainer asserts a cancelled run does
+// not leak its container: teardown must outlive the run's context (gh-63,
+// AUD-001). Teardown on a cancelled context races the daemon request, so
+// the leak only appears on some runs — the scenario loops five times.
+func TestDockerRunnerCancelledRunRemovesContainer(t *testing.T) {
+	r := requireDocker(t)
+	before := alpineContainerIDs(t)
+
+	job := domain.Job{
+		Name:  "cancel-repro",
+		Image: "alpine:latest",
+		Steps: []domain.Step{{Name: "hang", Run: "sleep 10"}},
+	}
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			time.Sleep(1200 * time.Millisecond)
+			cancel()
+		}()
+
+		_, err := r.Run(ctx, job, t.TempDir(), nil)
+		if err == nil {
+			t.Error("Run() expected an error when the context is cancelled mid-step")
+		}
+		for id := range alpineContainerIDs(t) {
+			if !before[id] {
+				t.Errorf("cancelled run leaked its container %s", id)
+			}
+		}
+	}
 }
 
 func TestDockerRunnerRunEcho(t *testing.T) {

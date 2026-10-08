@@ -69,7 +69,11 @@ func (r *DockerRunner) Run(ctx context.Context, job domain.Job, projectPath stri
 	r.loggerFromCtx(ctx).Info("container created", "containerID", shortID(containerID))
 
 	defer func() {
-		if err := r.removeContainer(ctx, containerID); err != nil {
+		// Teardown must not inherit the run's fate (AUD-001): a cancelled or
+		// timed-out run still removes its container, under its own deadline.
+		teardownCtx, teardownCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer teardownCancel()
+		if err := r.removeContainer(teardownCtx, containerID); err != nil {
 			r.loggerFromCtx(ctx).Error("remove container failed", "containerID", shortID(containerID), "error", err)
 		}
 	}()
@@ -129,8 +133,11 @@ func (r *DockerRunner) createContainer(ctx context.Context, job domain.Job, proj
 
 	resp, err := r.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
-			Image:      job.Image,
-			Env:        env,
+			Image: job.Image,
+			Env:   env,
+			// Labels mark the container as this job's so operators and tests
+			// can attribute containers to runs without guessing by image.
+			Labels:     map[string]string{"odyssey.job": job.Name},
 			WorkingDir: workDir,
 			Cmd:        []string{"sh", "-c", "tail -f /dev/null"},
 		},

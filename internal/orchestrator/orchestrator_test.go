@@ -130,7 +130,7 @@ func TestOrchestratorPassesSinkToRunner(t *testing.T) {
 	t.Run("configured sink reaches the runner, stamped with the pipeline", func(t *testing.T) {
 		sink := &fakeSink{}
 		fake := &fakeRunner{results: map[string]domain.JobResult{"job-a": newPassedJob("job-a")}}
-		_, _ = orchestrator.New(fake, sink, nil).Run(context.Background(), pipeline, t.TempDir())
+		orchestrator.New(fake, sink, nil).Run(context.Background(), pipeline, t.TempDir())
 
 		sinks := fake.receivedSinks()
 		if len(sinks) != 1 || sinks[0] == nil {
@@ -158,7 +158,7 @@ func TestOrchestratorPassesSinkToRunner(t *testing.T) {
 
 	t.Run("nil sink passes through as nil", func(t *testing.T) {
 		fake := &fakeRunner{results: map[string]domain.JobResult{"job-a": newPassedJob("job-a")}}
-		_, _ = orchestrator.New(fake, nil, nil).Run(context.Background(), pipeline, t.TempDir())
+		orchestrator.New(fake, nil, nil).Run(context.Background(), pipeline, t.TempDir())
 
 		sinks := fake.receivedSinks()
 		if len(sinks) != 1 || sinks[0] != nil {
@@ -195,9 +195,7 @@ func TestOrchestratorEmitsLifecycleEvents(t *testing.T) {
 			{Name: "build", Jobs: []domain.Job{simpleJob("a"), simpleJob("b"), simpleJob("c")}},
 		},
 	}
-	if _, err := o.Run(context.Background(), pipeline, "."); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	o.Run(context.Background(), pipeline, ".")
 
 	events := fake.recorded()
 	if len(events) != 8 {
@@ -262,10 +260,7 @@ func TestOrchestratorSinkErrorDoesNotFailRun(t *testing.T) {
 			{Name: "build", Jobs: []domain.Job{simpleJob("a")}},
 		},
 	}
-	result, err := orchestrator.New(r, breaking, nil).Run(context.Background(), pipeline, ".")
-	if err != nil {
-		t.Fatalf("Run with failing sink: %v", err)
-	}
+	result := orchestrator.New(r, breaking, nil).Run(context.Background(), pipeline, ".")
 	if result.Status() != domain.StatusPassed {
 		t.Errorf("status = %v, want passed despite failing sink", result.Status())
 	}
@@ -290,10 +285,7 @@ func TestOrchestratorSingleStageSingleJob(t *testing.T) {
 		},
 	}
 
-	result, err := o.Run(context.Background(), pipeline, "/tmp")
-	if err != nil {
-		t.Fatalf("Run() unexpected error: %v", err)
-	}
+	result := o.Run(context.Background(), pipeline, "/tmp")
 
 	if result.PipelineName != "ci" {
 		t.Errorf("PipelineName = %q, want %q", result.PipelineName, "ci")
@@ -342,10 +334,7 @@ func TestOrchestratorSingleStageMultipleJobs(t *testing.T) {
 		},
 	}
 
-	result, err := o.Run(context.Background(), pipeline, "/tmp")
-	if err != nil {
-		t.Fatalf("Run() unexpected error: %v", err)
-	}
+	result := o.Run(context.Background(), pipeline, "/tmp")
 
 	if len(result.StageResults) != 1 {
 		t.Fatalf("expected 1 stage result, got %d", len(result.StageResults))
@@ -391,10 +380,7 @@ func TestOrchestratorMultipleStages(t *testing.T) {
 		},
 	}
 
-	result, err := o.Run(context.Background(), pipeline, "/tmp")
-	if err != nil {
-		t.Fatalf("Run() unexpected error: %v", err)
-	}
+	result := o.Run(context.Background(), pipeline, "/tmp")
 
 	if len(result.StageResults) != 3 {
 		t.Fatalf("expected 3 stage results, got %d", len(result.StageResults))
@@ -454,10 +440,7 @@ func TestOrchestratorMixedStatuses(t *testing.T) {
 		},
 	}
 
-	result, err := o.Run(context.Background(), pipeline, "/tmp")
-	if err != nil {
-		t.Fatalf("Run() unexpected error: %v", err)
-	}
+	result := o.Run(context.Background(), pipeline, "/tmp")
 
 	if len(result.StageResults[0].JobResults) != 3 {
 		t.Fatalf("expected 3 job results, got %d", len(result.StageResults[0].JobResults))
@@ -481,10 +464,7 @@ func TestOrchestratorEmptyPipeline(t *testing.T) {
 		Stages: []domain.Stage{},
 	}
 
-	result, err := o.Run(context.Background(), pipeline, "/tmp")
-	if err != nil {
-		t.Fatalf("Run() unexpected error: %v", err)
-	}
+	result := o.Run(context.Background(), pipeline, "/tmp")
 
 	if result.PipelineName != "empty" {
 		t.Errorf("PipelineName = %q, want %q", result.PipelineName, "empty")
@@ -532,7 +512,7 @@ func TestOrchestratorJobsRunConcurrently(t *testing.T) {
 	done := make(chan struct{})
 	var result domain.PipelineResult
 	go func() {
-		result, _ = o.Run(context.Background(), pipeline, "/tmp")
+		result = o.Run(context.Background(), pipeline, "/tmp")
 		close(done)
 	}()
 
@@ -582,10 +562,7 @@ func TestOrchestratorRunnerErrorDoesNotBlockOtherJobs(t *testing.T) {
 		},
 	}
 
-	result, err := o.Run(context.Background(), pipeline, "/tmp")
-	if err != nil {
-		t.Fatalf("Run() unexpected error: %v", err)
-	}
+	result := o.Run(context.Background(), pipeline, "/tmp")
 
 	// Both jobs must have results, even though one errored.
 	jobs := result.StageResults[0].JobResults
@@ -650,7 +627,7 @@ func TestOrchestratorFinishedEventsSurviveCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		_, _ = o.Run(ctx, pipeline, "/tmp")
+		_ = o.Run(ctx, pipeline, "/tmp")
 		close(done)
 	}()
 
@@ -691,14 +668,8 @@ func TestOrchestratorStampsRunIDOnEvents(t *testing.T) {
 		},
 	}
 
-	res1, err := o.Run(context.Background(), pipeline, "/tmp")
-	if err != nil {
-		t.Fatalf("first Run() unexpected error: %v", err)
-	}
-	res2, err := o.Run(context.Background(), pipeline, "/tmp")
-	if err != nil {
-		t.Fatalf("second Run() unexpected error: %v", err)
-	}
+	res1 := o.Run(context.Background(), pipeline, "/tmp")
+	res2 := o.Run(context.Background(), pipeline, "/tmp")
 
 	if res1.RunID == "" {
 		t.Error("PipelineResult.RunID is empty")
@@ -720,6 +691,40 @@ func TestOrchestratorStampsRunIDOnEvents(t *testing.T) {
 }
 
 
+// TestOrchestratorRunIsFailFast asserts the first Failed or Errored stage
+// ends the run: later stages are skipped and absent from the result
+// (recorded decision on gh-82, AUD-015).
+func TestOrchestratorRunIsFailFast(t *testing.T) {
+	r := &fakeRunner{
+		results: map[string]domain.JobResult{
+			"test":   newFailedJob("test"),
+			"deploy": newPassedJob("deploy"),
+		},
+		errs: map[string]error{},
+	}
+	o := orchestrator.New(r, nil, nil)
+
+	pipeline := domain.Pipeline{
+		Name: "ci",
+		Stages: []domain.Stage{
+			{Name: "s1", Jobs: []domain.Job{simpleJob("test")}},
+			{Name: "s2", Jobs: []domain.Job{simpleJob("deploy")}},
+		},
+	}
+
+	result := o.Run(context.Background(), pipeline, "/tmp")
+
+	if len(r.calls) != 1 || r.calls[0] != "test" {
+		t.Errorf("jobs run = %v, want only the failed stage's job", r.calls)
+	}
+	if len(result.StageResults) != 1 {
+		t.Errorf("stage results = %d, want 1 (later stages are skipped, not executed)", len(result.StageResults))
+	}
+	if result.Status() != domain.StatusFailed {
+		t.Errorf("status = %v, want failed", result.Status())
+	}
+}
+
 // TestOrchestratorStageDurationIsWallClock asserts stage and pipeline
 // durations measure wall-clock time — two concurrent 150ms jobs must
 // report about 150ms, not the 300ms a sequential sum would give (AUD-009).
@@ -733,10 +738,7 @@ func TestOrchestratorStageDurationIsWallClock(t *testing.T) {
 		},
 	}
 
-	result, err := o.Run(context.Background(), pipeline, "/tmp")
-	if err != nil {
-		t.Fatalf("Run() unexpected error: %v", err)
-	}
+	result := o.Run(context.Background(), pipeline, "/tmp")
 
 	stage := result.StageResults[0].Duration
 	if stage < 150*time.Millisecond || stage >= 300*time.Millisecond {

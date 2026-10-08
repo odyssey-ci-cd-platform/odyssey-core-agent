@@ -41,6 +41,7 @@ Design effort is deliberately weighted away from infrastructure plumbing (networ
 - Defer infrastructure plumbing complexity (networking, registries, exotic scheduling) to protect focus on the intelligence layer.
 - Prefer direct, slightly repetitive call sites over an abstraction that doesn't earn its weight.
 - Schema fields should be minimal and orthogonal; contradictory combinations get rejected at validation time, not silently accepted.
+- Fail-fast between stages: the first Failed or Errored stage ends the run, and later stages are skipped — recorded decision (gh-82, AUD-015).
 
 ## Architecture
 

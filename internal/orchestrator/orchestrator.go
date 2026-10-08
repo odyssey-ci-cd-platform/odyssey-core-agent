@@ -89,7 +89,9 @@ func newRunID() string {
 // Run executes every stage in the pipeline. Jobs within a stage run
 // concurrently. Stages run fail-fast: the first Failed or Errored stage
 // ends the run and later stages are skipped (recorded decision, gh-82).
-func (o *Orchestrator) Run(ctx context.Context, pipeline domain.Pipeline, projectPath string) (domain.PipelineResult, error) {
+// Run never fails — the result carries what happened, including cancelled
+// runs, so there is no error return (AUD-015).
+func (o *Orchestrator) Run(ctx context.Context, pipeline domain.Pipeline, projectPath string) domain.PipelineResult {
 	runID := newRunID()
 	result := domain.PipelineResult{
 		RunID:        runID,
@@ -101,6 +103,10 @@ func (o *Orchestrator) Run(ctx context.Context, pipeline domain.Pipeline, projec
 	for _, stage := range pipeline.Stages {
 		stageResult := o.runStage(ctx, stage, pipeline.Name, runID, projectPath)
 		result.StageResults = append(result.StageResults, stageResult)
+		// Fail-fast: a failed or errored stage ends the run (gh-82).
+		if worst := stageResult.Status(); worst == domain.StatusFailed || worst == domain.StatusErrored {
+			break
+		}
 	}
 	result.Duration = time.Since(runStart)
 	// Finished events are the record that a run ended; they must not die
@@ -113,7 +119,7 @@ func (o *Orchestrator) Run(ctx context.Context, pipeline domain.Pipeline, projec
 		Pipeline:   pipeline.Name,
 		Payload:    map[string]string{"status": result.Status().String()},
 	})
-	return result, nil
+	return result
 }
 
 // runStage executes all jobs in a stage concurrently and returns the

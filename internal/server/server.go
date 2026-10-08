@@ -63,7 +63,7 @@ func (s Server) RunPipeline(ctx context.Context, request *odysseyv1.RunPipelineR
 	logger.Info("pipeline started", "pipeline", pipeline.Name)
 	orch := orchestrator.New(r, s.Events, logger)
 
-	pipelineResult, _ := orch.Run(ctx, pipeline, request.ProjectPath)
+	pipelineResult := orch.Run(ctx, pipeline, request.ProjectPath)
 	response := domainPipelineResultToProto(pipelineResult)
 
 	logger.Info("pipeline finished",

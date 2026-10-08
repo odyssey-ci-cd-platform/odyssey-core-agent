@@ -148,7 +148,7 @@ flowchart TD
 Deliberately two sinks with different semantics, not one box doing both jobs:
 
 - Event bus: ephemeral, multi-consumer, real-time. **Decided: Redis Streams for v1** — see [ADR 0001](docs/adr/0001-event-bus-technology.md) for the trade-off analysis (Kafka rejected as ops-heavy; NATS JetStream kept as the growth path).
-- Results DB: durable, queryable, the source of truth for flakiness/trend analysis over time.
+- Results DB: durable, queryable, the source of truth for flakiness/trend analysis over time. **Decided: embedded SQLite for v1** — see [ADR 0002](docs/adr/0002-results-db-technology.md) for the trade-off analysis (Postgres deferred as the documented growth path; a single results-recorder consumer is the only writer).
 
 ### AI engine (narrowed scope)
 
@@ -211,6 +211,6 @@ Single job only: given a flagged failure (new failure, or high flakiness score) 
 ## Open questions
 
 - Registry proxy: rewrite image references at orchestration time, or rely on Docker daemon `registry-mirrors`?
-- Does `dataVizService` need direct results-DB query access on day one, or can it start off the event bus only?
-- Should `loggingService` persist to durable storage independently of the streaming layer, rather than only riding the ephemeral event bus?
+- ~~Does `dataVizService` need direct results-DB query access on day one, or can it start off the event bus only?~~ Settled: yes, direct day-one access — see [ADR 0002](docs/adr/0002-results-db-technology.md).
+- Should `loggingService` persist to durable storage independently of the streaming layer, rather than only riding the ephemeral event bus? Partially settled: history lands in the results DB via the recorder (ADR 0002); whether loggingService additionally persists its own full-log store is still open.
 - CVE scan: informational surface only, or a hard build gate? This determines whether it needs a path back into the orchestrator's scheduling decision or just needs to publish findings.

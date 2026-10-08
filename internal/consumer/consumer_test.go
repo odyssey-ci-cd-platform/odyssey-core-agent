@@ -3,6 +3,7 @@ package consumer_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -216,6 +217,85 @@ func TestConsumerCatchUpAfterRestart(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("catch-up delivered %v, want %v (no redelivery of acked entries)", got, want)
 		}
+	}
+}
+
+// TestConsumerDeadLettersAfterMaxAttempts asserts ADR 0001's recovery
+// shape: a poison event is retried through claims (MinIdle), and once its
+// attempts are exhausted it lands in the dead-letter stream with its
+// envelope intact and leaves the group pending list empty — one poison
+// event must not wedge the group.
+func TestConsumerDeadLettersAfterMaxAttempts(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	ctx := context.Background()
+	publish(t, client, domain.Event{Type: "test.poison", Pipeline: "p"})
+
+	attempts := make(chan struct{}, 16)
+	handler := func(context.Context, domain.Event) error {
+		attempts <- struct{}{}
+		return errors.New("poison")
+	}
+	c, err := consumer.New(client, handler, consumer.Options{
+		Group: "svc", Consumer: "c1",
+		MinIdle: 10 * time.Millisecond, MaxAttempts: 3, Block: 50 * time.Millisecond,
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	runErr := make(chan error, 1)
+	go func() { runErr <- c.Run(runCtx) }()
+
+	// Initial delivery + two claim retries = three failed attempts.
+	for i := 0; i < 3; i++ {
+		select {
+		case <-attempts:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("attempt %d never happened; poison wedged the group", i+1)
+		}
+	}
+
+	// The dead-letter pass must land the envelope in odyssey:dead.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		n, err := client.XLen(ctx, bus.StreamDead).Result()
+		if err == nil && n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("dead-letter stream did not receive the poison event (len err: %v)", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	dead, err := client.XRange(ctx, bus.StreamDead, "-", "+").Result()
+	if err != nil || len(dead) != 1 {
+		t.Fatalf("dead-letter range: %v (%d entries)", err, len(dead))
+	}
+	if env, _ := dead[0].Values["envelope"].(string); !strings.Contains(env, "test.poison") {
+		t.Errorf("dead-letter envelope = %q, want the original event JSON", env)
+	}
+
+	// Acking the dead-lettered entry unwedges the group.
+	pending, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{
+		Stream: bus.StreamEvents, Group: "svc", Start: "-", End: "+", Count: 10,
+	}).Result()
+	if err != nil {
+		t.Fatalf("XPendingExt: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending entries after dead-letter = %d, want 0", len(pending))
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("Run returned error on shutdown: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not stop after context cancel")
 	}
 }
 

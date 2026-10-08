@@ -108,6 +108,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		c.recoverStuck(ctx)
 		res, err := c.client.XReadGroup(ctx, &redis.XReadGroupArgs{
 			Group:    c.opts.Group,
 			Consumer: c.opts.Consumer,
@@ -137,6 +138,68 @@ func (c *Consumer) ensureGroup(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// recoverStuck retries entries whose handler failed long enough ago
+// (MinIdle) by claiming them, and dead-letters entries whose attempts are
+// exhausted (ADR 0001). Redis errors are logged, never fatal.
+func (c *Consumer) recoverStuck(ctx context.Context) {
+	pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{
+		Stream: c.opts.Stream, Group: c.opts.Group, Start: "-", End: "+", Count: 64,
+	}).Result()
+	if err != nil {
+		if ctx.Err() == nil {
+			c.logger.Warn("pending scan failed", "err", err)
+		}
+		return
+	}
+
+	// XAUTOCLAIM bumps each claimed entry's delivery count, which is what
+	// XPENDING reports as the retry count — no separate counter needed.
+	for _, p := range pending {
+		if p.RetryCount >= int64(c.opts.MaxAttempts) {
+			c.deadLetter(ctx, p.ID)
+			continue
+		}
+		claimed, _, err := c.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			Stream: c.opts.Stream, Group: c.opts.Group, Consumer: c.opts.Consumer,
+			MinIdle: c.opts.MinIdle, Start: p.ID, Count: 1,
+		}).Result()
+		if err != nil {
+			c.logger.Warn("entry claim failed", "id", p.ID, "err", err)
+			continue
+		}
+		for _, msg := range claimed {
+			c.handle(ctx, msg)
+		}
+	}
+}
+
+// deadLetter copies an exhausted entry's envelope to the dead-letter
+// stream and acknowledges it, so one poison event cannot wedge the group
+// (ADR 0001). An ack failure re-runs the whole pass later: at-least-once
+// means a duplicate dead-letter entry is possible, never a lost one.
+func (c *Consumer) deadLetter(ctx context.Context, id string) {
+	entries, err := c.client.XRange(ctx, c.opts.Stream, id, id).Result()
+	if err != nil {
+		c.logger.Warn("dead-letter read failed", "id", id, "err", err)
+		return
+	}
+	if len(entries) == 1 {
+		raw, _ := entries[0].Values["envelope"].(string)
+		if err := c.client.XAdd(ctx, &redis.XAddArgs{
+			Stream: bus.StreamDead,
+			Values: map[string]any{"envelope": raw, "source_id": id},
+		}).Err(); err != nil {
+			c.logger.Warn("dead-letter write failed", "id", id, "err", err)
+			return
+		}
+	}
+	if err := c.client.XAck(ctx, c.opts.Stream, c.opts.Group, id).Err(); err != nil {
+		c.logger.Warn("dead-letter ack failed", "id", id, "err", err)
+		return
+	}
+	c.logger.Warn("event dead-lettered", "id", id)
 }
 
 // handle parses one stream entry and processes it, acknowledging on

@@ -15,6 +15,10 @@ const (
 	// StreamEvents is the single stream all lifecycle events land on (ADR 0001).
 	StreamEvents = "odyssey:events"
 
+	// StreamDead receives events whose handling attempts were exhausted
+	// (ADR 0001); ops inspects it manually.
+	StreamDead = "odyssey:dead"
+
 	// maxStreamLen bounds retention via approximate XADD trimming; the
 	// results DB owns history, nothing replays from the bus (ADR 0001).
 	maxStreamLen = 100000

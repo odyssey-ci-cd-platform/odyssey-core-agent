@@ -63,16 +63,16 @@ grep -q "event bus enabled" "$SRV_LOG" || fail "server did not log event bus ena
 	|| fail "client run failed (see $CLI_OUT)"
 grep -q "Status: STATUS_PASSED" "$CLI_OUT" || fail "pipeline did not pass (see $CLI_OUT)"
 
-# 5. Assert the stream: exactly the four lifecycle events, tagged with the pipeline.
+# 5. Assert the stream: exactly the six lifecycle events, tagged with the pipeline.
 XLEN=$(docker exec "$REDIS_CONTAINER" redis-cli XLEN odyssey:events)
-[[ "$XLEN" == "4" ]] || fail "XLEN odyssey:events = $XLEN, want 4"
+[[ "$XLEN" == "6" ]] || fail "XLEN odyssey:events = $XLEN, want 6"
 
 STREAM=$(docker exec "$REDIS_CONTAINER" redis-cli --raw XRANGE odyssey:events - +)
-for type in pipeline.started job.started job.finished pipeline.finished; do
+for type in pipeline.started job.started step.started step.finished job.finished pipeline.finished; do
 	echo "$STREAM" | grep -q "\"type\":\"$type\"" || fail "missing event $type"
 done
 NAMES=$(echo "$STREAM" | grep -o '"pipeline":"[^"]*"' | sort -u)
 [[ "$NAMES" == '"pipeline":"e2e-smoke"' ]] || fail "unexpected pipeline names: $NAMES"
 
-echo "PASS: 4 lifecycle events for e2e-smoke on odyssey:events"
+echo "PASS: 6 lifecycle events for e2e-smoke on odyssey:events"
 echo "$STREAM" | grep -o '"type":"[^"]*"'

@@ -24,6 +24,11 @@ func TestStepResultStatus(t *testing.T) {
 			r:    domain.StepResult{ExitCode: domain.ExitFailure},
 			want: domain.StatusFailed,
 		},
+		{
+			name: "infrastructure fault returns errored regardless of exit code",
+			r:    domain.StepResult{ExitCode: domain.ExitNone, Err: errors.New("exec failed")},
+			want: domain.StatusErrored,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

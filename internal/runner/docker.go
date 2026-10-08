@@ -171,8 +171,14 @@ func (r *DockerRunner) removeContainer(ctx context.Context, containerID string) 
 // runSetup runs setup command for the Job.
 func (r *DockerRunner) runSetup(ctx context.Context, containerID string, setupCmd []string) error {
 	for _, command := range setupCmd {
-		if _, _, _, err := r.execCommand(ctx, containerID, command, nil); err != nil {
+		code, _, _, err := r.execCommand(ctx, containerID, command, nil)
+		if err != nil {
 			return err
+		}
+		// A setup command exiting non-zero means the job cannot proceed;
+		// it is a setup failure (Errored), not a step result.
+		if code != domain.ExitSuccess {
+			return fmt.Errorf("setup command %q exited with code %d", command, code)
 		}
 	}
 	// Start each job with an empty env file so a step can append to it and
@@ -196,9 +202,8 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 		if err != nil {
 			stepResults = append(stepResults, domain.StepResult{
 				StepName: step.Name,
-				Stdout:   err.Error(),
-				Stderr:   err.Error(),
-				ExitCode: domain.ExitFailure,
+				ExitCode: domain.ExitNone,
+				Err:      err,
 				Duration: time.Since(stepStartTime),
 			})
 			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
@@ -256,6 +261,7 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 				Stderr:   res.Stderr,
 				ExitCode: res.ExitCode,
 				Duration: time.Since(stepStartTime),
+				Err:      res.RunErr,
 			})
 			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
 			if res.RunErr != nil {
@@ -270,9 +276,8 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 		if err != nil {
 			stepResults = append(stepResults, domain.StepResult{
 				StepName: step.Name,
-				Stdout:   err.Error(),
-				Stderr:   err.Error(),
-				ExitCode: domain.ExitFailure,
+				ExitCode: domain.ExitNone,
+				Err:      err,
 				Duration: time.Since(stepStartTime),
 			})
 			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
@@ -312,9 +317,12 @@ func stepFinishedEvent(jobName string, result domain.StepResult) domain.Event {
 // readExportedEnv reads the in-container env file and parses its KEY=value
 // lines into a map. See parseEnvFile for the parsing rules.
 func (r *DockerRunner) readExportedEnv(ctx context.Context, containerID string) (map[string]string, error) {
-	_, stdout, _, err := r.execCommand(ctx, containerID, "cat "+envFilePath, nil)
+	code, stdout, _, err := r.execCommand(ctx, containerID, "cat "+envFilePath, nil)
 	if err != nil {
 		return nil, err
+	}
+	if code != domain.ExitSuccess {
+		return nil, fmt.Errorf("env file read exited with code %d", code)
 	}
 	return parseEnvFile(stdout), nil
 }
@@ -330,31 +338,29 @@ func (r *DockerRunner) execCommand(ctx context.Context, containerID string, comm
 	}
 	execCreateResult, err := r.client.ExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return domain.ExitFailure, "", "", err
+		return domain.ExitNone, "", "", err
 	}
 
 	execID := execCreateResult.ID
 	resp, err := r.client.ExecAttach(ctx, execID, client.ExecAttachOptions{})
 	if err != nil {
-		return domain.ExitFailure, "", "", err
+		return domain.ExitNone, "", "", err
 	}
 	defer resp.Close()
 
 	var stdout, stderr bytes.Buffer
 	if _, err := stdcopy.StdCopy(&stdout, &stderr, resp.Reader); err != nil {
-		return domain.ExitFailure, "", "", err
+		return domain.ExitNone, "", "", err
 	}
 
 	inspect, err := r.client.ExecInspect(ctx, execID, client.ExecInspectOptions{})
 	if err != nil {
-		return domain.ExitFailure, "", "", err
+		return domain.ExitNone, "", "", err
 	}
 
-	out, errOut := stdout.String(), stderr.String()
-	if inspect.ExitCode != 0 {
-		return domain.ExitFailure, out, errOut, fmt.Errorf("command exited with exit code %d", inspect.ExitCode)
-	}
-	return domain.ExitSuccess, out, errOut, nil
+	// A non-zero exit is the process's own result, not an infrastructure
+	// error: report the real code and no error (AUD-003).
+	return domain.ExitCode(inspect.ExitCode), stdout.String(), stderr.String(), nil
 }
 
 // mountArchive creates a tar of the project directory and copies it into destinationPath inside the container

@@ -120,6 +120,7 @@ func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, pipelin
 				jobLogger.Error("job failed",
 					"job", job.Name,
 					"stepCount", len(jobResult.StepResults),
+					"error", err,
 				)
 			}
 			mu.Lock()

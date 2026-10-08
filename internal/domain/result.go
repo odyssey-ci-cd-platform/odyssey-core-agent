@@ -9,10 +9,17 @@ type StepResult struct {
 	Stderr   string
 	ExitCode ExitCode
 	Duration time.Duration
+	// Err carries an infrastructure fault (exec or env read failure) as
+	// opposed to a process failure, which is a non-zero ExitCode.
+	Err error
 }
 
-// Status returns Passed if the step exited successfully, else Failed
+// Status returns Errored if the step hit an infrastructure fault, Passed if
+// the process exited successfully, else Failed.
 func (r StepResult) Status() Status {
+	if r.Err != nil {
+		return StatusErrored
+	}
 	if r.ExitCode == ExitSuccess {
 		return StatusPassed
 	}
@@ -27,9 +34,10 @@ type JobResult struct {
 }
 
 // Status returns:
-//   - StatusError if the job's setup failed before steps could run
+//   - StatusErrored if the job's setup failed or any step hit an
+//     infrastructure fault
 //   - StatusPending if there are no steps and no setup error
-//   - StatusFailed if any step failed
+//   - StatusFailed if any step's process exited non-zero
 //   - StatusPassed if all steps passed
 func (r JobResult) Status() Status {
 	if r.SetupErr != nil {
@@ -38,12 +46,11 @@ func (r JobResult) Status() Status {
 	if len(r.StepResults) == 0 {
 		return StatusPending
 	}
+	worst := StatusPassed
 	for _, sr := range r.StepResults {
-		if sr.Status() == StatusFailed {
-			return StatusFailed
-		}
+		worst = worstStatus(worst, sr.Status())
 	}
-	return StatusPassed
+	return worst
 }
 
 // Duration returns time taken (time.Duration) for the job to complete

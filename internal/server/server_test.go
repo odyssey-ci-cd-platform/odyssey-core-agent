@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
@@ -116,7 +117,7 @@ func TestDomainStepResultToProto(t *testing.T) {
 			r:    domain.StepResult{StepName: "build", Stdout: "compiled", ExitCode: domain.ExitSuccess},
 			want: &odysseyv1.StepResult{
 				StepName: "build",
-				Output:   "compiled",
+				Stdout:   "compiled",
 				ExitCode: 0,
 				Status:   odysseyv1.Status_STATUS_PASSED,
 			},
@@ -126,19 +127,41 @@ func TestDomainStepResultToProto(t *testing.T) {
 			r:    domain.StepResult{StepName: "test", Stderr: "assertion failed", ExitCode: domain.ExitFailure},
 			want: &odysseyv1.StepResult{
 				StepName: "test",
-				Output:   "\nassertion failed",
+				Stderr:   "assertion failed",
 				ExitCode: 1,
 				Status:   odysseyv1.Status_STATUS_FAILED,
 			},
 		},
 		{
-			name: "step with stdout and stderr combines both",
+			name: "step with stdout and stderr keeps the streams separate",
 			r:    domain.StepResult{StepName: "lint", Stdout: "ok", Stderr: "warning", ExitCode: domain.ExitSuccess},
 			want: &odysseyv1.StepResult{
 				StepName: "lint",
-				Output:   "ok\nwarning",
+				Stdout:   "ok",
+				Stderr:   "warning",
 				ExitCode: 0,
 				Status:   odysseyv1.Status_STATUS_PASSED,
+			},
+		},
+		{
+			name: "infrastructure fault carries the error text and no fabricated output",
+			r:    domain.StepResult{StepName: "build", ExitCode: domain.ExitNone, Err: errors.New("exec failed")},
+			want: &odysseyv1.StepResult{
+				StepName: "build",
+				Error:    "exec failed",
+				ExitCode: -1,
+				Status:   odysseyv1.Status_STATUS_ERRORED,
+			},
+		},
+		{
+			name: "duration round-trips in milliseconds",
+			r:    domain.StepResult{StepName: "build", Stdout: "ok", ExitCode: domain.ExitSuccess, Duration: 1500 * time.Millisecond},
+			want: &odysseyv1.StepResult{
+				StepName:   "build",
+				Stdout:     "ok",
+				ExitCode:   0,
+				Status:     odysseyv1.Status_STATUS_PASSED,
+				DurationMs: 1500,
 			},
 		},
 	}
@@ -148,14 +171,23 @@ func TestDomainStepResultToProto(t *testing.T) {
 			if got.StepName != tt.want.StepName {
 				t.Errorf("StepName = %q, want %q", got.StepName, tt.want.StepName)
 			}
-			if got.Output != tt.want.Output {
-				t.Errorf("Output = %q, want %q", got.Output, tt.want.Output)
+			if got.Stdout != tt.want.Stdout {
+				t.Errorf("Stdout = %q, want %q", got.Stdout, tt.want.Stdout)
+			}
+			if got.Stderr != tt.want.Stderr {
+				t.Errorf("Stderr = %q, want %q", got.Stderr, tt.want.Stderr)
+			}
+			if got.Error != tt.want.Error {
+				t.Errorf("Error = %q, want %q", got.Error, tt.want.Error)
 			}
 			if got.ExitCode != tt.want.ExitCode {
 				t.Errorf("ExitCode = %d, want %d", got.ExitCode, tt.want.ExitCode)
 			}
 			if got.Status != tt.want.Status {
 				t.Errorf("Status = %v, want %v", got.Status, tt.want.Status)
+			}
+			if got.DurationMs != tt.want.DurationMs {
+				t.Errorf("DurationMs = %d, want %d", got.DurationMs, tt.want.DurationMs)
 			}
 		})
 	}

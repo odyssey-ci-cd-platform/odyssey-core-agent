@@ -1,8 +1,6 @@
 package server
 
 import (
-	"fmt"
-
 	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 )
@@ -29,18 +27,21 @@ func domainStatusToProto(s domain.Status) odysseyv1.Status {
 }
 
 // domainStepResultToProto converts a single domain step result to its
-// protobuf form. Stdout and stderr are combined into the Output field.
+// protobuf form. Stdout and stderr stay separate; an infrastructure fault
+// travels in Error (AUD-004).
 func domainStepResultToProto(r domain.StepResult) *odysseyv1.StepResult {
-	output := r.Stdout
-	if r.Stderr != "" {
-		output = fmt.Sprintf("%s\n%s", output, r.Stderr)
+	p := &odysseyv1.StepResult{
+		StepName:   r.StepName,
+		Stdout:     r.Stdout,
+		Stderr:     r.Stderr,
+		ExitCode:   int32(r.ExitCode),
+		Status:     domainStatusToProto(r.Status()),
+		DurationMs: r.Duration.Milliseconds(),
 	}
-	return &odysseyv1.StepResult{
-		StepName: r.StepName,
-		Output:   output,
-		ExitCode: int32(r.ExitCode),
-		Status:   domainStatusToProto(r.Status()),
+	if r.Err != nil {
+		p.Error = r.Err.Error()
 	}
+	return p
 }
 
 // domainJobResultToProto converts a single domain job result to its
@@ -51,11 +52,18 @@ func domainJobResultToProto(r domain.JobResult) *odysseyv1.JobResult {
 	for _, sr := range r.StepResults {
 		protoStepResults = append(protoStepResults, domainStepResultToProto(sr))
 	}
-	return &odysseyv1.JobResult{
+	p := &odysseyv1.JobResult{
 		JobName:     r.JobName,
 		Status:      domainStatusToProto(r.Status()),
 		StepResults: protoStepResults,
+		// Steps run sequentially within a job, so the summed duration is the
+		// job's wall time.
+		DurationMs: r.Duration().Milliseconds(),
 	}
+	if r.SetupErr != nil {
+		p.Error = r.SetupErr.Error()
+	}
+	return p
 }
 
 // domainStageResultToProto converts a single domain stage result to its

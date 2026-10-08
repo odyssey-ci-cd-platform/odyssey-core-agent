@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"os"
 
 	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/config"
@@ -43,6 +44,13 @@ func (s Server) logger() *slog.Logger {
 // creation failures return Internal.
 func (s Server) RunPipeline(ctx context.Context, request *odysseyv1.RunPipelineRequest) (*odysseyv1.RunPipelineResponse, error) {
 	logger := s.logger().With("project_path", request.ProjectPath)
+
+	// When a project root is configured, every request must stay under it;
+	// without one the server is a local-development tool (AUD-005).
+	if root := os.Getenv("ODYSSEY_PROJECT_ROOT"); root != "" && !projectPathAllowed(root, request.ProjectPath) {
+		logger.Error("project path outside the configured project root", "root", root)
+		return &odysseyv1.RunPipelineResponse{}, status.Errorf(codes.InvalidArgument, "project_path %q is outside the configured project root", request.ProjectPath)
+	}
 
 	pipeline, err := config.Load(request.ProjectPath)
 	if err != nil {

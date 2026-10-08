@@ -131,6 +131,12 @@ flowchart TD
 
 ## Component details
 
+### Server environment variables (odyssey-core)
+
+- `ODYSSEY_ADDR` — the address the gRPC server binds, used verbatim (`:50051`, `host:50051`). Unset, the server binds `localhost:50051`, so an unconfigured server is not reachable from the network (AUD-005).
+- `ODYSSEY_PROJECT_ROOT` — when set, every request's `project_path` must resolve under this directory; requests outside it are rejected. Unset, paths are unrestricted, which is the local-development posture (AUD-005).
+- `ODYSSEY_REDIS_ADDR` — enables the event bus when set; without it the server runs with the bus disabled (ADR 0001).
+
 ### Execution model (odyssey-core)
 
 - Each step (`exec_run`) is a fresh shell invocation inside the job's container; shell state does **not** persist between steps. Only filesystem state persists.

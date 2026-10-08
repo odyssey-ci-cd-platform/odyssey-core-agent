@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -18,6 +17,17 @@ import (
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/server"
 )
 
+// listenAddr returns the address the gRPC server binds. It defaults to
+// localhost so an unconfigured server is not reachable from the network;
+// ODYSSEY_ADDR is used verbatim, so both ":6000" and "host:6000" work
+// (AUD-005).
+func listenAddr(env string) string {
+	if env != "" {
+		return env
+	}
+	return "localhost:50051"
+}
+
 func main() {
 	logger := newLogger()
 
@@ -25,10 +35,7 @@ func main() {
 		logger.Warn(".env file not found, skipping", "error", err)
 	}
 
-	addr := ":50051"
-	if v := os.Getenv("ODYSSEY_ADDR"); v != "" {
-		addr = fmt.Sprintf(":%s", v)
-	}
+	addr := listenAddr(os.Getenv("ODYSSEY_ADDR"))
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {

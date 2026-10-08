@@ -59,6 +59,29 @@ timout = 500
 
 
 
+// TestLoadRejectsStageWithoutJobs asserts a declared stage with no jobs
+// fails validation instead of leaving the pipeline Pending forever (AUD-007).
+func TestLoadRejectsStageWithoutJobs(t *testing.T) {
+	dir := t.TempDir()
+	writeOdysseyConfig(t, dir, `[pipeline]
+name = "ci"
+stages = ["build", "test"]
+
+[jobs.compile]
+stage = "build"
+image = "alpine:latest"
+steps = [{ name = "run", run = "echo hi" }]
+`, "")
+
+	_, err := config.Load(dir)
+	if err == nil {
+		t.Fatal("Load() expected an error for a stage with no jobs, got nil")
+	}
+	if !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "no jobs") {
+		t.Errorf("error should name the empty stage, got: %v", err)
+	}
+}
+
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name         string

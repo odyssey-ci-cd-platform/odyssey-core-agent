@@ -60,7 +60,9 @@ func (root RootConfig) Validate() error {
 		errs = append(errs, errors.New("pipeline must define at least one job"))
 	}
 
+	jobsPerStage := make(map[string]int)
 	for jobName, job := range root.Jobs {
+		jobsPerStage[job.Stage]++
 		if job.Stage == "" {
 			errs = append(errs, fmt.Errorf("job %q: stage must not be empty", jobName))
 		} else if !seen[job.Stage] {
@@ -79,6 +81,14 @@ func (root RootConfig) Validate() error {
 			if step.Run == "" {
 				errs = append(errs, fmt.Errorf("job %q: step %d (%q): run must not be empty", jobName, stepNumber+1, step.Name))
 			}
+		}
+	}
+
+	// A declared stage with no jobs would aggregate to Pending forever;
+	// reject it at validation (AUD-007).
+	for _, stage := range root.Pipeline.Stages {
+		if jobsPerStage[stage] == 0 {
+			errs = append(errs, fmt.Errorf("stage %q has no jobs", stage))
 		}
 	}
 	return errors.Join(errs...)

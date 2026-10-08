@@ -98,9 +98,9 @@ func newLogger() *slog.Logger {
 
 	opts := &slog.HandlerOptions{Level: level}
 
-	if logFormat := os.Getenv("ODYSSEY_LOG_FORMAT"); logFormat == "json" {
-		return slog.New(slog.NewJSONHandler(os.Stdout, opts))
-	} else {
-		return slog.New(slog.NewTextHandler(os.Stderr, opts))
+	// Both formats log to stderr; stdout stays reserved for data.
+	if os.Getenv("ODYSSEY_LOG_FORMAT") == "json" {
+		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
 	}
+	return slog.New(slog.NewTextHandler(os.Stderr, opts))
 }

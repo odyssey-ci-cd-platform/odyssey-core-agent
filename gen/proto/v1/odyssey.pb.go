@@ -475,7 +475,7 @@ const file_odyssey_proto_rawDesc = "" +
 	"\x06stderr\x18\x06 \x01(\tR\x06stderr\x12\x14\n" +
 	"\x05error\x18\a \x01(\tR\x05error\x12\x1f\n" +
 	"\vduration_ms\x18\b \x01(\x03R\n" +
-	"durationMsJ\x04\b\x02\x10\x03*\x96\x01\n" +
+	"durationMsJ\x04\b\x02\x10\x03*\x9c\x01\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_PENDING\x10\x01\x12\x12\n" +
@@ -483,7 +483,7 @@ const file_odyssey_proto_rawDesc = "" +
 	"\rSTATUS_PASSED\x10\x03\x12\x11\n" +
 	"\rSTATUS_FAILED\x10\x04\x12\x12\n" +
 	"\x0eSTATUS_SKIPPED\x10\x05\x12\x12\n" +
-	"\x0eSTATUS_ERRORED\x10\a2`\n" +
+	"\x0eSTATUS_ERRORED\x10\a\"\x04\b\x06\x10\x062`\n" +
 	"\x0eOdysseyService\x12N\n" +
 	"\vRunPipeline\x12\x1e.odyssey.v1.RunPipelineRequest\x1a\x1f.odyssey.v1.RunPipelineResponseBDZBbitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1;odysseyv1b\x06proto3"
 

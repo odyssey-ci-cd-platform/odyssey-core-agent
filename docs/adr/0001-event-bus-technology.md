@@ -58,7 +58,7 @@ Operational shape (binding for gh-17 implementation):
 5. **Durability:** AOF enabled (`appendonly yes`) on the Redis instance.
 6. **Graceful degradation:** if the bus is unreachable, pipeline execution proceeds unaffected and emission failures are logged, never fatal. The engine stays runnable without Redis (this also keeps the Docker test suites Redis-free).
 
-No `Bus` interface abstraction is introduced — call sites `XADD` directly through a thin package. Per design principles, an abstraction that only re-wraps one implementation doesn't earn its weight; if a second bus ever arrives, extract the interface then.
+No generic `Bus` abstraction hides multiple implementations — `internal/bus` is a thin Redis adapter, and the engine's seams are the small consumer-owned interfaces (`orchestrator.EventSink`, `runner.StepSink`). Per design principles, an abstraction that only re-wraps one implementation doesn't earn its weight; if a second bus ever arrives, extract a generic interface then. (Corrected 2026-10-09: the original wording predated the seam interfaces the code actually defines.)
 
 ## When to revisit
 

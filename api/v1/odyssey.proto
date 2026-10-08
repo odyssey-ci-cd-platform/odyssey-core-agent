@@ -12,6 +12,7 @@ enum Status {
   STATUS_PASSED = 3;
   STATUS_FAILED = 4;
   STATUS_SKIPPED = 5;
+  reserved 6; // was a transient STATUS_ERROR spelling; never released.
   STATUS_ERRORED = 7;
 }
 

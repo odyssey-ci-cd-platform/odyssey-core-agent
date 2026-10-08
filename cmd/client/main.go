@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", "localhost:8080", "gRPC server address")
+	addr := flag.String("addr", "localhost:50051", "gRPC server address")
 	timeout := flag.Duration("timeout", 120*time.Second, "pipeline timeout")
 	flag.Parse()
 

@@ -457,7 +457,7 @@ func TestDockerRunnerExportsEnvBetweenSteps(t *testing.T) {
 		Name:  "export-env-test",
 		Image: "alpine:latest",
 		Steps: []domain.Step{
-			{Name: "export", Run: `echo "SHARED=from-step-one" >> "$ODYSSEY_ENV"`},
+			{Name: "export", Run: `echo "SHARED=from-step-one" >> "$ODYSSEY_ENV_FILE"`},
 			{Name: "consume", Run: "echo $SHARED"},
 		},
 	}
@@ -487,7 +487,7 @@ func TestDockerRunnerExportedEnvOverridesJobEnv(t *testing.T) {
 		Env:   map[string]string{"SHARED": "job-level"},
 		Steps: []domain.Step{
 			{Name: "before override", Run: "echo $SHARED"},
-			{Name: "override", Run: `echo "SHARED=step-level" >> "$ODYSSEY_ENV"`},
+			{Name: "override", Run: `echo "SHARED=step-level" >> "$ODYSSEY_ENV_FILE"`},
 			{Name: "after override", Run: "echo $SHARED"},
 		},
 	}
@@ -612,7 +612,7 @@ func TestDockerRunnerRunExportedEnvReadError(t *testing.T) {
 			// Removing the env file makes the after-step readExportedEnv fail,
 			// which is an infrastructure fault and must surface as Errored,
 			// not as a process failure (AUD-003).
-			{Name: "remove env file", Run: `rm -f "$ODYSSEY_ENV"`},
+			{Name: "remove env file", Run: `rm -f "$ODYSSEY_ENV_FILE"`},
 		},
 	}
 

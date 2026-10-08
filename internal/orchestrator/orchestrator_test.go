@@ -632,8 +632,8 @@ func TestOrchestratorFinishedEventsSurviveCancellation(t *testing.T) {
 	}()
 
 	entered.Wait()
-	cancel()          // the run is cancelled while the job is mid-flight
-	close(release)    // the job then finishes
+	cancel()       // the run is cancelled while the job is mid-flight
+	close(release) // the job then finishes
 	<-done
 
 	var finished []string
@@ -689,7 +689,6 @@ func TestOrchestratorStampsRunIDOnEvents(t *testing.T) {
 		t.Errorf("events span %d run IDs, want exactly the 2 runs", len(ids))
 	}
 }
-
 
 // TestOrchestratorRunIsFailFast asserts the first Failed or Errored stage
 // ends the run: later stages are skipped and absent from the result

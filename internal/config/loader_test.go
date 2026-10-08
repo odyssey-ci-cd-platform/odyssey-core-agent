@@ -58,8 +58,6 @@ timout = 500
 	}
 }
 
-
-
 // TestLoadRejectsStageWithoutJobs asserts a declared stage with no jobs
 // fails validation instead of leaving the pipeline Pending forever (AUD-007).
 func TestLoadRejectsStageWithoutJobs(t *testing.T) {

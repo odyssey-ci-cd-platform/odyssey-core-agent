@@ -5,21 +5,21 @@ import (
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 )
 
-// domainStatusToProto maps a domain.Status slug to the corresponding
-// protobuf Status enum. Unknown or empty slugs produce STATUS_UNSPECIFIED.
+// domainStatusToProto maps a domain.Status to the corresponding protobuf
+// Status enum. Unknown statuses produce STATUS_UNSPECIFIED.
 func domainStatusToProto(s domain.Status) odysseyv1.Status {
-	switch s.String() {
-	case "passed":
+	switch s {
+	case domain.StatusPassed:
 		return odysseyv1.Status_STATUS_PASSED
-	case "failed":
+	case domain.StatusFailed:
 		return odysseyv1.Status_STATUS_FAILED
-	case "errored":
+	case domain.StatusErrored:
 		return odysseyv1.Status_STATUS_ERRORED
-	case "pending":
+	case domain.StatusPending:
 		return odysseyv1.Status_STATUS_PENDING
-	case "running":
+	case domain.StatusRunning:
 		return odysseyv1.Status_STATUS_RUNNING
-	case "skipped":
+	case domain.StatusSkipped:
 		return odysseyv1.Status_STATUS_SKIPPED
 	default:
 		return odysseyv1.Status_STATUS_UNSPECIFIED

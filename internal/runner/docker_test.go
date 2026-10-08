@@ -2,13 +2,97 @@ package runner_test
 
 import (
 	"context"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/runner"
 )
+
+// recordingSink is a StepSink that records events in memory.
+type recordingSink struct {
+	mu     sync.Mutex
+	events []domain.Event
+}
+
+func (s *recordingSink) Publish(_ context.Context, event domain.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *recordingSink) recorded() []domain.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]domain.Event(nil), s.events...)
+}
+
+// TestDockerRunnerEmitsStepEvents asserts every executed step yields exactly
+// one started and one finished event, in order, tagged with the job, with
+// only the status in the finished payload — never stdout/stderr content
+// (gh-52; ADR 0001 keeps output content off the bus).
+func TestDockerRunnerEmitsStepEvents(t *testing.T) {
+	r := requireDocker(t)
+	dir := t.TempDir()
+
+	job := domain.Job{
+		Name:  "events-job",
+		Image: "alpine",
+		Steps: []domain.Step{
+			{Name: "good", Run: "echo ok"},
+			{Name: "bad", Run: "false"},
+		},
+	}
+	sink := &recordingSink{}
+
+	result, err := r.Run(context.Background(), job, dir, sink)
+	// Repo contract (TestDockerRunnerRunFailingCommand): a failing command
+	// returns an error in addition to the failed step result.
+	if err == nil {
+		t.Fatal("Run: want error for the failing second step")
+	}
+	if result.Status() != domain.StatusFailed {
+		t.Fatalf("job status = %v, want failed (second step fails)", result.Status())
+	}
+
+	var types []string
+	for _, e := range sink.recorded() {
+		if e.Job != "events-job" {
+			t.Errorf("event %q tagged job %q, want events-job", e.Type, e.Job)
+			continue
+		}
+		types = append(types, e.Type+"("+e.Step+")")
+	}
+	want := []string{
+		"step.started(good)", "step.finished(good)",
+		"step.started(bad)", "step.finished(bad)",
+	}
+	if !slices.Equal(types, want) {
+		t.Errorf("step events = %v, want %v", types, want)
+	}
+
+	for _, e := range sink.recorded() {
+		if e.Type != domain.EventStepFinished {
+			continue
+		}
+		wantStatus := "passed"
+		if e.Step == "bad" {
+			wantStatus = "failed"
+		}
+		if e.Payload["status"] != wantStatus {
+			t.Errorf("step %q finished payload status = %q, want %q", e.Step, e.Payload["status"], wantStatus)
+		}
+		for _, leak := range []string{"stdout", "stderr"} {
+			if _, has := e.Payload[leak]; has {
+				t.Errorf("step %q finished payload leaks %s", e.Step, leak)
+			}
+		}
+	}
+}
 
 func TestNewDockerRunner(t *testing.T) {
 	r, err := runner.NewDockerRunner(nil)

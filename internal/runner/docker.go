@@ -181,6 +181,7 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 
 	for _, step := range job.Steps {
 		stepStartTime := time.Now()
+		r.emitStep(ctx, events, domain.Event{Type: domain.EventStepStarted, OccurredAt: time.Now(), Job: job.Name, Step: step.Name})
 
 		// Vars exported by earlier steps, injected as this exec's env. Exec env
 		// overrides the container's job-level env.
@@ -193,6 +194,7 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 				ExitCode: domain.ExitFailure,
 				Duration: time.Since(stepStartTime),
 			})
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
 			return stepResults, fmt.Errorf("failed to read exported env before step %q: %w", step.Name, err)
 		}
 
@@ -235,6 +237,7 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 				ExitCode: domain.ExitFailure,
 				Duration: time.Since(stepStartTime),
 			})
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
 			return stepResults, timeoutErr
 		case res := <-stepChan:
 			if cancel != nil {
@@ -247,6 +250,7 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 				ExitCode: res.ExitCode,
 				Duration: time.Since(stepStartTime),
 			})
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
 			if res.RunErr != nil {
 				r.logger.Error("step %s failed to run: %v", step.Name, res.RunErr)
 				return stepResults, res.RunErr
@@ -264,6 +268,7 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 				ExitCode: domain.ExitFailure,
 				Duration: time.Since(stepStartTime),
 			})
+			r.emitStep(ctx, events, stepFinishedEvent(job.Name, stepResults[len(stepResults)-1]))
 			return stepResults, fmt.Errorf("failed to read exported env after step %q: %w", step.Name, err)
 		}
 		if keys := newlyExportedKeys(exported, after); len(keys) > 0 {
@@ -271,6 +276,30 @@ func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job dom
 		}
 	}
 	return stepResults, nil
+}
+
+// emitStep publishes one step lifecycle event. Emission failures are
+// logged, never fatal — step execution proceeds unaffected (ADR 0001).
+func (r *DockerRunner) emitStep(ctx context.Context, events StepSink, event domain.Event) {
+	if events == nil {
+		return
+	}
+	if err := events.Publish(ctx, event); err != nil {
+		r.loggerFromCtx(ctx).Warn("event emit failed", "type", event.Type, "step", event.Step, "err", err)
+	}
+}
+
+// stepFinishedEvent builds the finished envelope for an appended step
+// result. The payload carries the status only — never stdout/stderr
+// content (ADR 0001 keeps output off the bus).
+func stepFinishedEvent(jobName string, result domain.StepResult) domain.Event {
+	return domain.Event{
+		Type:       domain.EventStepFinished,
+		OccurredAt: time.Now(),
+		Job:        jobName,
+		Step:       result.StepName,
+		Payload:    map[string]string{"status": result.Status().String()},
+	}
 }
 
 // readExportedEnv reads the in-container env file and parses its KEY=value

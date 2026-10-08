@@ -130,18 +130,27 @@ func (r PipelineResult) Duration() time.Duration {
 }
 
 // statusRank gives each Status a precedence for aggregation purposes:
-// Error is worst, then Failed, then Pending, then Passed is best.
+// Errored is worst, then Failed, then Unknown, then Running, then Pending,
+// then Skipped, then Passed is best. Every status is ranked explicitly so
+// a future status cannot silently aggregate as healthy (AUD-010).
 func statusRank(s Status) int {
 	switch s {
 	case StatusErrored:
-		return 3
+		return 6
 	case StatusFailed:
-		return 2
+		return 5
+	case StatusUnknown:
+		return 4
+	case StatusRunning:
+		return 3
 	case StatusPending:
+		return 2
+	case StatusSkipped:
 		return 1
-	default: // StatusPassed
+	case StatusPassed:
 		return 0
 	}
+	return 0
 }
 
 // worstStatus returns whichever of a, b ranks worse per statusRank.

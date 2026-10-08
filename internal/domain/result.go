@@ -98,6 +98,8 @@ func (r StageResult) Duration() time.Duration {
 
 // PipelineResult holds the results of all stages within a pipeline.
 type PipelineResult struct {
+	// RunID identifies the run that produced this result (AUD-012).
+	RunID        string
 	PipelineName string
 	StageResults []StageResult
 }

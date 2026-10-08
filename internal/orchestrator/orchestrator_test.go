@@ -2,6 +2,8 @@ package orchestrator_test
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -599,6 +601,121 @@ func TestOrchestratorRunnerErrorDoesNotBlockOtherJobs(t *testing.T) {
 	}
 	if !foundGood {
 		t.Error("the 'good' job was not run or did not pass — errored sibling blocked it")
+	}
+}
+
+// strictSink models the real bus: publishing on a cancelled context fails.
+type strictSink struct {
+	mu     sync.Mutex
+	events []domain.Event
+}
+
+func (s *strictSink) Publish(ctx context.Context, event domain.Event) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *strictSink) recorded() []domain.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]domain.Event(nil), s.events...)
+}
+
+// TestOrchestratorFinishedEventsSurviveCancellation asserts a cancelled run
+// still publishes its finished events — the record that the run ended
+// (AUD-012).
+func TestOrchestratorFinishedEventsSurviveCancellation(t *testing.T) {
+	sink := &strictSink{}
+	var entered sync.WaitGroup
+	entered.Add(1)
+	release := make(chan struct{})
+	o := orchestrator.New(&blockingRunner{
+		entered: &entered,
+		release: release,
+		results: map[string]domain.JobResult{"build": newPassedJob("build")},
+	}, sink, nil)
+
+	pipeline := domain.Pipeline{
+		Name: "ci",
+		Stages: []domain.Stage{
+			{Name: "s1", Jobs: []domain.Job{simpleJob("build")}},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_, _ = o.Run(ctx, pipeline, "/tmp")
+		close(done)
+	}()
+
+	entered.Wait()
+	cancel()          // the run is cancelled while the job is mid-flight
+	close(release)    // the job then finishes
+	<-done
+
+	var finished []string
+	for _, e := range sink.recorded() {
+		if strings.HasSuffix(e.Type, ".finished") {
+			finished = append(finished, e.Type)
+		}
+	}
+	if !slices.Contains(finished, domain.EventJobFinished) {
+		t.Errorf("job.finished lost on cancellation; finished events: %v", finished)
+	}
+	if !slices.Contains(finished, domain.EventPipelineFinished) {
+		t.Errorf("pipeline.finished lost on cancellation; finished events: %v", finished)
+	}
+}
+
+// TestOrchestratorStampsRunIDOnEvents asserts every event of one run shares
+// a non-empty run ID, that concurrent runs differ, and that the result
+// carries the run's ID (AUD-012).
+func TestOrchestratorStampsRunIDOnEvents(t *testing.T) {
+	r := &fakeRunner{
+		results: map[string]domain.JobResult{"build": newPassedJob("build")},
+		errs:    map[string]error{},
+	}
+	sink := &strictSink{}
+	o := orchestrator.New(r, sink, nil)
+
+	pipeline := domain.Pipeline{
+		Name: "ci",
+		Stages: []domain.Stage{
+			{Name: "s1", Jobs: []domain.Job{simpleJob("build")}},
+		},
+	}
+
+	res1, err := o.Run(context.Background(), pipeline, "/tmp")
+	if err != nil {
+		t.Fatalf("first Run() unexpected error: %v", err)
+	}
+	res2, err := o.Run(context.Background(), pipeline, "/tmp")
+	if err != nil {
+		t.Fatalf("second Run() unexpected error: %v", err)
+	}
+
+	if res1.RunID == "" {
+		t.Error("PipelineResult.RunID is empty")
+	}
+	if res1.RunID == res2.RunID {
+		t.Errorf("two runs share the run ID %q", res1.RunID)
+	}
+	ids := map[string]bool{}
+	for _, e := range sink.recorded() {
+		if e.RunID == "" {
+			t.Errorf("event %q carries no run ID", e.Type)
+			continue
+		}
+		ids[e.RunID] = true
+	}
+	if len(ids) != 2 {
+		t.Errorf("events span %d run IDs, want exactly the 2 runs", len(ids))
 	}
 }
 

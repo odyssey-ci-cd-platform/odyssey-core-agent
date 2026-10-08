@@ -2,6 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -48,42 +51,63 @@ func (o *Orchestrator) emit(ctx context.Context, event domain.Event) {
 
 // stepSink returns the sink handed to the runner: nil when the bus is
 // disabled, otherwise a view stamping runner-built events with the pipeline
-// name before emission — the runner knows steps, not which pipeline it
-// serves (ADR 0001: envelopes carry the pipeline).
-func (o *Orchestrator) stepSink(pipelineName string) runner.StepSink {
+// name and run ID before emission — the runner knows steps, not which
+// pipeline or run it serves (ADR 0001: envelopes carry the pipeline).
+func (o *Orchestrator) stepSink(pipelineName string, runID string) runner.StepSink {
 	if o.sink == nil {
 		return nil
 	}
-	return &stampedSink{sink: o.sink, pipeline: pipelineName}
+	return &stampedSink{sink: o.sink, pipeline: pipelineName, runID: runID}
 }
 
 // stampedSink adapts the orchestrator's EventSink to runner.StepSink,
-// filling in the pipeline name on every event that passes through.
+// filling in the pipeline name and run ID on every event that passes
+// through.
 type stampedSink struct {
 	sink     EventSink
 	pipeline string
+	runID    string
 }
 
 func (s *stampedSink) Publish(ctx context.Context, event domain.Event) error {
 	event.Pipeline = s.pipeline
+	event.RunID = s.runID
 	return s.sink.Publish(ctx, event)
 }
 
+// newRunID returns a unique identifier for one pipeline run: a timestamp
+// for ordering plus random bytes for uniqueness across concurrent runs.
+func newRunID() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// The timestamp alone still distinguishes sequential runs.
+		return fmt.Sprintf("run-%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("run-%d-%s", time.Now().UnixNano(), hex.EncodeToString(b[:]))
+}
+
 // Run executes every stage in the pipeline. Jobs within a stage run
-// concurrently. All stages are executed regardless of failures.
+// concurrently. Stages run fail-fast: the first Failed or Errored stage
+// ends the run and later stages are skipped (recorded decision, gh-82).
 func (o *Orchestrator) Run(ctx context.Context, pipeline domain.Pipeline, projectPath string) (domain.PipelineResult, error) {
+	runID := newRunID()
 	result := domain.PipelineResult{
+		RunID:        runID,
 		PipelineName: pipeline.Name,
 		StageResults: make([]domain.StageResult, 0, len(pipeline.Stages)),
 	}
-	o.emit(ctx, domain.Event{Type: domain.EventPipelineStarted, OccurredAt: time.Now(), Pipeline: pipeline.Name})
+	o.emit(ctx, domain.Event{Type: domain.EventPipelineStarted, OccurredAt: time.Now(), RunID: runID, Pipeline: pipeline.Name})
 	for _, stage := range pipeline.Stages {
-		stageResult := o.runStage(ctx, stage, pipeline.Name, projectPath)
+		stageResult := o.runStage(ctx, stage, pipeline.Name, runID, projectPath)
 		result.StageResults = append(result.StageResults, stageResult)
 	}
-	o.emit(ctx, domain.Event{
+	// Finished events are the record that a run ended; they must not die
+	// with a cancelled context (AUD-012).
+	finishedCtx := context.WithoutCancel(ctx)
+	o.emit(finishedCtx, domain.Event{
 		Type:       domain.EventPipelineFinished,
 		OccurredAt: time.Now(),
+		RunID:      runID,
 		Pipeline:   pipeline.Name,
 		Payload:    map[string]string{"status": result.Status().String()},
 	})
@@ -92,7 +116,7 @@ func (o *Orchestrator) Run(ctx context.Context, pipeline domain.Pipeline, projec
 
 // runStage executes all jobs in a stage concurrently and returns the
 // aggregated StageResult.
-func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, pipelineName string, projectPath string) domain.StageResult {
+func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, pipelineName string, runID string, projectPath string) domain.StageResult {
 	stageLogger := o.logger.With("stage", stage.Name)
 	stageLogger.Info("stage started")
 	start := time.Now()
@@ -107,11 +131,14 @@ func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, pipelin
 			jobLogger := stageLogger.With("job", job.Name)
 			jobCtx := common.ContextWithLogger(ctx, jobLogger)
 
-			o.emit(jobCtx, domain.Event{Type: domain.EventJobStarted, OccurredAt: time.Now(), Pipeline: pipelineName, Job: job.Name})
-			jobResult, err := o.runner.Run(jobCtx, job, projectPath, o.stepSink(pipelineName))
-			o.emit(jobCtx, domain.Event{
+			o.emit(jobCtx, domain.Event{Type: domain.EventJobStarted, OccurredAt: time.Now(), RunID: runID, Pipeline: pipelineName, Job: job.Name})
+			jobResult, err := o.runner.Run(jobCtx, job, projectPath, o.stepSink(pipelineName, runID))
+			// The finished event is the record that the job ended; it must
+			// not die with a cancelled context (AUD-012).
+			o.emit(context.WithoutCancel(jobCtx), domain.Event{
 				Type:       domain.EventJobFinished,
 				OccurredAt: time.Now(),
+				RunID:      runID,
 				Pipeline:   pipelineName,
 				Job:        job.Name,
 				Payload:    map[string]string{"status": jobResult.Status().String()},

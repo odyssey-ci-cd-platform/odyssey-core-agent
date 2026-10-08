@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- Lifecycle events carry a run ID and finished events survive run cancellation (gh-67).
 - Repository audit process (`audit/PROCESS.md`) and the first recorded audit, evaluated at 7d7be54 (gh-60).
 - gRPC contract: step results carry stdout, stderr, error text, and duration separately; job results carry error and duration; stage, pipeline, and response carry durations (gh-66).
 - Results DB technology decision record: embedded SQLite chosen for v1, normalized schema, single results-recorder writer, direct read access for analytics services (gh-17).

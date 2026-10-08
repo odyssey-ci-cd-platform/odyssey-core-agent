@@ -77,6 +77,7 @@ func domainStageResultToProto(r domain.StageResult) *odysseyv1.StageResult {
 		StageName:  r.StageName,
 		Status:     domainStatusToProto(r.Status()),
 		JobResults: protoJobResults,
+		DurationMs: r.Duration.Milliseconds(),
 	}
 }
 
@@ -92,5 +93,6 @@ func domainPipelineResultToProto(r domain.PipelineResult) odysseyv1.RunPipelineR
 		PipelineName: r.PipelineName,
 		Status:       domainStatusToProto(r.Status()),
 		StageResults: protoStageResults,
+		DurationMs:   r.Duration.Milliseconds(),
 	}
 }

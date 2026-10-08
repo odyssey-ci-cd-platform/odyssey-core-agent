@@ -97,10 +97,12 @@ func (o *Orchestrator) Run(ctx context.Context, pipeline domain.Pipeline, projec
 		StageResults: make([]domain.StageResult, 0, len(pipeline.Stages)),
 	}
 	o.emit(ctx, domain.Event{Type: domain.EventPipelineStarted, OccurredAt: time.Now(), RunID: runID, Pipeline: pipeline.Name})
+	runStart := time.Now()
 	for _, stage := range pipeline.Stages {
 		stageResult := o.runStage(ctx, stage, pipeline.Name, runID, projectPath)
 		result.StageResults = append(result.StageResults, stageResult)
 	}
+	result.Duration = time.Since(runStart)
 	// Finished events are the record that a run ended; they must not die
 	// with a cancelled context (AUD-012).
 	finishedCtx := context.WithoutCancel(ctx)
@@ -161,6 +163,7 @@ func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, pipelin
 	stageResult := domain.StageResult{
 		StageName:  stage.Name,
 		JobResults: jobResults,
+		Duration:   time.Since(start),
 	}
 	stageLogger.Info("stage finished",
 		"status", stageResult.Status().String(),

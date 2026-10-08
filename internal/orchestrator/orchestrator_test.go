@@ -719,8 +719,53 @@ func TestOrchestratorStampsRunIDOnEvents(t *testing.T) {
 	}
 }
 
+
+// TestOrchestratorStageDurationIsWallClock asserts stage and pipeline
+// durations measure wall-clock time — two concurrent 150ms jobs must
+// report about 150ms, not the 300ms a sequential sum would give (AUD-009).
+func TestOrchestratorStageDurationIsWallClock(t *testing.T) {
+	o := orchestrator.New(&sleepRunner{d: 150 * time.Millisecond}, nil, nil)
+
+	pipeline := domain.Pipeline{
+		Name: "ci",
+		Stages: []domain.Stage{
+			{Name: "s1", Jobs: []domain.Job{simpleJob("a"), simpleJob("b")}},
+		},
+	}
+
+	result, err := o.Run(context.Background(), pipeline, "/tmp")
+	if err != nil {
+		t.Fatalf("Run() unexpected error: %v", err)
+	}
+
+	stage := result.StageResults[0].Duration
+	if stage < 150*time.Millisecond || stage >= 300*time.Millisecond {
+		t.Errorf("stage duration = %v, want concurrent wall clock in [150ms, 300ms)", stage)
+	}
+	total := result.Duration
+	if total < 150*time.Millisecond || total >= 300*time.Millisecond {
+		t.Errorf("pipeline duration = %v, want concurrent wall clock in [150ms, 300ms)", total)
+	}
+}
+
+// sleepRunner sleeps for d on every Run, standing in for real work long
+// enough to measure wall-clock aggregation.
+type sleepRunner struct {
+	d time.Duration
+}
+
+func (s *sleepRunner) Run(ctx context.Context, job domain.Job, _ string, _ runner.StepSink) (domain.JobResult, error) {
+	select {
+	case <-ctx.Done():
+		return domain.JobResult{JobName: job.Name}, ctx.Err()
+	case <-time.After(s.d):
+	}
+	return newPassedJob(job.Name), nil
+}
+
 // Compile-time check that our fakes satisfy the Runner interface.
 var (
 	_ runner.Runner = (*fakeRunner)(nil)
 	_ runner.Runner = (*blockingRunner)(nil)
+	_ runner.Runner = (*sleepRunner)(nil)
 )

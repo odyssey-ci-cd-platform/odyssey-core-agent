@@ -53,7 +53,8 @@ func (r JobResult) Status() Status {
 	return worst
 }
 
-// Duration returns time taken (time.Duration) for the job to complete
+// Duration returns the sum of its steps' durations. Steps run
+// sequentially, so the sum is the job's wall time.
 func (r JobResult) Duration() time.Duration {
 	if len(r.StepResults) == 0 {
 		return 0
@@ -69,6 +70,10 @@ func (r JobResult) Duration() time.Duration {
 type StageResult struct {
 	StageName  string
 	JobResults []JobResult
+	// Duration is the stage's wall-clock time, measured by the orchestrator
+	// around the whole stage — jobs run concurrently, so a sum would be
+	// wrong (AUD-009).
+	Duration time.Duration
 }
 
 // Status returns the worst status among all jobs, in precedence order
@@ -84,22 +89,14 @@ func (r StageResult) Status() Status {
 	return worst
 }
 
-// Duration returns time taken (time.Duration) for the stage to complete
-func (r StageResult) Duration() time.Duration {
-	if len(r.JobResults) == 0 {
-		return 0
-	}
-	stageDuration := time.Duration(0)
-	for _, jr := range r.JobResults {
-		stageDuration += jr.Duration()
-	}
-	return stageDuration
-}
-
 // PipelineResult holds the results of all stages within a pipeline.
 type PipelineResult struct {
 	// RunID identifies the run that produced this result (AUD-012).
-	RunID        string
+	RunID string
+	// Duration is the run's wall-clock time, measured by the orchestrator
+	// around the whole run (AUD-009).
+	Duration time.Duration
+
 	PipelineName string
 	StageResults []StageResult
 }
@@ -115,18 +112,6 @@ func (r PipelineResult) Status() Status {
 		worst = worstStatus(worst, sr.Status())
 	}
 	return worst
-}
-
-// Duration returns time taken (time.Duration) for the Pipeline to complete
-func (r PipelineResult) Duration() time.Duration {
-	if len(r.StageResults) == 0 {
-		return 0
-	}
-	pipelineDuration := time.Duration(0)
-	for _, sr := range r.StageResults {
-		pipelineDuration += sr.Duration()
-	}
-	return pipelineDuration
 }
 
 // statusRank gives each Status a precedence for aggregation purposes:

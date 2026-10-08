@@ -17,7 +17,7 @@ type fakeRunner struct {
 	errs    map[string]error
 
 	mu    sync.Mutex
-	calls []string         // records job names in the order Run() was called
+	calls []string          // records job names in the order Run() was called
 	sinks []runner.StepSink // records the sink each Run() received
 }
 

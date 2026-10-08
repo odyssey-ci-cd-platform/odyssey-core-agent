@@ -73,7 +73,7 @@ Format: symptom → diagnose → resolve.
 
 ### 3.1 Suite state vs the recorded baseline
 
-- Symptom: everything green — that is the recorded baseline; no action.
+- Symptom: everything green — that is the recorded baseline; `make check` covers vet, tests, module tidiness (`go mod tidy -diff`), and gofmt cleanliness; no action.
 - Symptom: failures or hangs confined to `internal/runner/docker_test.go` — run `docker info` first; a stopped daemon fails those tests for infra reasons, not code reasons.
 - Symptom: any other failure — regression; fix before commit.
 

@@ -47,7 +47,7 @@ func (r *DockerRunner) loggerFromCtx(ctx context.Context) *slog.Logger {
 	return common.LoggerFromContext(ctx, r.logger)
 }
 
-func (r *DockerRunner) Run(ctx context.Context, job domain.Job, projectPath string) (domain.JobResult, error) {
+func (r *DockerRunner) Run(ctx context.Context, job domain.Job, projectPath string, events StepSink) (domain.JobResult, error) {
 	jobResult := domain.JobResult{JobName: job.Name}
 
 	// Pull image
@@ -91,7 +91,7 @@ func (r *DockerRunner) Run(ctx context.Context, job domain.Job, projectPath stri
 	r.loggerFromCtx(ctx).Info("setup commands ran", "containerID", shortID(containerID))
 
 	// Run steps
-	stepResults, stepRunErr := r.runSteps(ctx, containerID, job.Steps)
+	stepResults, stepRunErr := r.runSteps(ctx, containerID, job, events)
 	if stepRunErr != nil {
 		stepRunErr = fmt.Errorf("failed to run steps: %w", stepRunErr)
 	}
@@ -176,10 +176,10 @@ func (r *DockerRunner) runSetup(ctx context.Context, containerID string, setupCm
 	return nil
 }
 
-func (r *DockerRunner) runSteps(ctx context.Context, containerID string, steps []domain.Step) ([]domain.StepResult, error) {
-	stepResults := make([]domain.StepResult, 0, len(steps))
+func (r *DockerRunner) runSteps(ctx context.Context, containerID string, job domain.Job, events StepSink) ([]domain.StepResult, error) {
+	stepResults := make([]domain.StepResult, 0, len(job.Steps))
 
-	for _, step := range steps {
+	for _, step := range job.Steps {
 		stepStartTime := time.Now()
 
 		// Vars exported by earlier steps, injected as this exec's env. Exec env

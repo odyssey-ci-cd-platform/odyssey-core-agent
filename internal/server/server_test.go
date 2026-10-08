@@ -13,6 +13,7 @@ import (
 
 	odysseyv1 "bitbucket.org/odyssey-ci/odyssey-core-agent/gen/proto/v1"
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/domain"
+	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/runner"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -29,7 +30,7 @@ type fakeRunner struct {
 	calls []string
 }
 
-func (f *fakeRunner) Run(_ context.Context, job domain.Job, _ string) (domain.JobResult, error) {
+func (f *fakeRunner) Run(_ context.Context, job domain.Job, _ string, _ runner.StepSink) (domain.JobResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, job.Name)
 	f.mu.Unlock()

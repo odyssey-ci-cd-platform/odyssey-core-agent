@@ -49,7 +49,7 @@ func TestDockerRunnerRunEcho(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err != nil {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestDockerRunnerRunFailingCommand(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	// A failing command must return an error in addition to the failed
 	// step result.
 	if err == nil {
@@ -128,7 +128,7 @@ func TestDockerRunnerRunWithEnvVars(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err != nil {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestDockerRunnerRunWithSetup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err != nil {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestDockerRunnerRunMultipleSteps(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err != nil {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestDockerRunnerExportsEnvBetweenSteps(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err != nil {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestDockerRunnerExportedEnvOverridesJobEnv(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err != nil {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestDockerRunnerRunSetupError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err == nil {
 		t.Error("Run() expected error for failed setup, got nil")
 	}
@@ -322,7 +322,7 @@ func TestDockerRunnerRunImagePullError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err == nil {
 		t.Fatal("Run() expected an error for a missing image, got nil")
 	}
@@ -350,7 +350,7 @@ func TestDockerRunnerRunMountError(t *testing.T) {
 
 	// A nonexistent project path makes mountArchive fail after the container
 	// is created, surfacing as a setup error.
-	result, err := r.Run(ctx, job, "/nonexistent/odyssey/project")
+	result, err := r.Run(ctx, job, "/nonexistent/odyssey/project", nil)
 	if err == nil {
 		t.Fatal("Run() expected an error for a missing project path, got nil")
 	}
@@ -379,7 +379,7 @@ func TestDockerRunnerRunExportedEnvReadError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err == nil {
 		t.Fatal("Run() expected an error when the env file can't be read, got nil")
 	}
@@ -404,7 +404,7 @@ func TestDockerRunnerRunStepDuration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err != nil {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestDockerRunnerRunStepTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err == nil {
 		t.Fatal("Run() expected an error for a step exceeding its timeout, got nil")
 	}
@@ -481,7 +481,7 @@ func TestDockerRunnerRunStepWithinTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := r.Run(ctx, job, dir)
+	result, err := r.Run(ctx, job, dir, nil)
 	if err != nil {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}

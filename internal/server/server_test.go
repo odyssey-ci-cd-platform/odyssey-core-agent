@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -58,6 +59,25 @@ func newErroredJob(name string) domain.JobResult {
 		JobName:  name,
 		SetupErr: errors.New("container creation failed"),
 	}
+}
+
+// fakeSink is an EventSink that records events in memory.
+type fakeSink struct {
+	mu     sync.Mutex
+	events []domain.Event
+}
+
+func (f *fakeSink) Publish(_ context.Context, event domain.Event) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+	return nil
+}
+
+func (f *fakeSink) recorded() []domain.Event {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.Event(nil), f.events...)
 }
 
 func TestDomainStatusToProto(t *testing.T) {
@@ -332,6 +352,50 @@ steps = [{ name = "echo", run = "echo hi" }]
 func bufDialer(lis *bufconn.Listener) func(context.Context, string) (net.Conn, error) {
 	return func(ctx context.Context, _ string) (net.Conn, error) {
 		return lis.Dial()
+	}
+}
+
+// TestServerRunPipeline_EmitsLifecycleEvents asserts that a server with a
+// configured event sink emits pipeline started and finished events when a
+// pipeline runs (gh-52): hosted runs must flow lifecycle events onto the bus.
+func TestServerRunPipeline_EmitsLifecycleEvents(t *testing.T) {
+	dir := t.TempDir()
+	writeODysseyConfig(t, dir)
+
+	fake := &fakeRunner{
+		results: map[string]domain.JobResult{
+			"test-job": newPassedJob("test-job"),
+		},
+		errs: map[string]error{},
+	}
+	sink := &fakeSink{}
+
+	srv := Server{Runner: fake, Events: sink}
+	resp, err := srv.RunPipeline(context.Background(), &odysseyv1.RunPipelineRequest{ProjectPath: dir})
+	if err != nil {
+		t.Fatalf("RunPipeline returned error: %v", err)
+	}
+	if resp.Status != odysseyv1.Status_STATUS_PASSED {
+		t.Errorf("Status = %v, want STATUS_PASSED", resp.Status)
+	}
+
+	types := make([]string, 0, len(sink.recorded()))
+	for _, e := range sink.recorded() {
+		if e.Pipeline != "test-pipeline" {
+			t.Errorf("event %q carries pipeline %q, want %q", e.Type, e.Pipeline, "test-pipeline")
+		}
+		types = append(types, e.Type)
+	}
+	// One job in the fixture, so the sequence is deterministic (gh-52 emits
+	// both pipeline and job lifecycle events).
+	want := []string{
+		domain.EventPipelineStarted,
+		domain.EventJobStarted,
+		domain.EventJobFinished,
+		domain.EventPipelineFinished,
+	}
+	if !slices.Equal(types, want) {
+		t.Errorf("emitted events = %v, want %v", types, want)
 	}
 }
 

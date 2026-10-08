@@ -2,6 +2,7 @@ package consumer_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -111,6 +112,110 @@ func TestConsumerDeliversAndAcks(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not stop after context cancel")
+	}
+}
+
+// TestConsumerHandlerFailureStaysPending asserts the at-least-once
+// contract: a handler error must leave the entry pending (no ack) so it
+// can be retried (ADR 0001).
+func TestConsumerHandlerFailureStaysPending(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	ctx := context.Background()
+	publish(t, client, domain.Event{Type: "test.poison", Pipeline: "p"})
+
+	attempts := make(chan struct{}, 4)
+	handler := func(context.Context, domain.Event) error {
+		attempts <- struct{}{}
+		return errors.New("handler boom")
+	}
+	c, err := consumer.New(client, handler, consumer.Options{Group: "svc", Consumer: "c1"}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	runErr := make(chan error, 1)
+	go func() { runErr <- c.Run(runCtx) }()
+
+	select {
+	case <-attempts:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler never called")
+	}
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("Run returned error on shutdown: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not stop after context cancel")
+	}
+
+	pending, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{
+		Stream: bus.StreamEvents, Group: "svc", Start: "-", End: "+", Count: 10,
+	}).Result()
+	if err != nil {
+		t.Fatalf("XPendingExt: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending entries after failed handling = %d, want 1 (at-least-once)", len(pending))
+	}
+}
+
+// TestConsumerCatchUpAfterRestart asserts the group cursor persists
+// across restarts: a fresh instance of the same service receives events
+// published while it was down, and does not redeliver acked entries.
+func TestConsumerCatchUpAfterRestart(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	ctx := context.Background()
+	publish(t, client, domain.Event{Type: "test.first", Pipeline: "p"})
+
+	col1 := newCollector(1)
+	c1, err := consumer.New(client, col1.handle, consumer.Options{Group: "svc", Consumer: "c1"}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	go func() { _ = c1.Run(runCtx) }()
+	select {
+	case <-col1.seen:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first consumer never received the event")
+	}
+	cancel()
+
+	// Published while the service is down.
+	publish(t, client, domain.Event{Type: "test.second", Pipeline: "p"})
+	publish(t, client, domain.Event{Type: "test.third", Pipeline: "p"})
+
+	col2 := newCollector(2)
+	c2, err := consumer.New(client, col2.handle, consumer.Options{Group: "svc", Consumer: "c2"}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	runCtx2, cancel2 := context.WithCancel(ctx)
+	go func() { _ = c2.Run(runCtx2) }()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-col2.seen:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("restart catch-up timed out; handled %v", col2.recorded())
+		}
+	}
+	cancel2()
+
+	var got []string
+	for _, e := range col2.recorded() {
+		got = append(got, e.Type)
+	}
+	want := []string{"test.second", "test.third"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("catch-up delivered %v, want %v (no redelivery of acked entries)", got, want)
+		}
 	}
 }
 

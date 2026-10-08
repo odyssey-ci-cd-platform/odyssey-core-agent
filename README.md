@@ -37,7 +37,7 @@ Design effort is deliberately weighted away from infrastructure plumbing (networ
 - Minimal abstractions. Readable over micro-optimized.
 - Functions over classes when no state is needed.
 - Language-agnostic: no hardcoded toolchain assumptions baked into the engine.
-- Config lives in a `.odyssev/` folder per project, in TOML.
+- Config lives in a `.odyssey/` folder per project, in TOML.
 - Defer infrastructure plumbing complexity (networking, registries, exotic scheduling) to protect focus on the intelligence layer.
 - Prefer direct, slightly repetitive call sites over an abstraction that doesn't earn its weight.
 - Schema fields should be minimal and orthogonal; contradictory combinations get rejected at validation time, not silently accepted.
@@ -47,7 +47,7 @@ Design effort is deliberately weighted away from infrastructure plumbing (networ
 
 ### Layers
 
-- **odyssey-core** — the execution engine. Given a resolved pipeline config, it runs jobs and steps, manages containers per job (Docker SDK, `exec_run` / `sleep infinity` model), captures stdout/stderr separately, and returns structured results. It has no knowledge of orchestrators, queues, or the hosted platform - it is a pure execution library, exposed over a **gRPC interface**.
+- **odyssey-core** — the execution engine. Given a resolved pipeline config, it runs jobs and steps, manages containers per job (Docker SDK: a per-job container running `tail -f /dev/null`, each step executed via `exec`), captures stdout/stderr separately, and returns structured results. It has no knowledge of orchestrators, queues, or the hosted platform - it is a pure execution library, exposed over a **gRPC interface**.
 - **Agent** — a thin daemon that runs alongside odyssey-core on each hosted runner node. It receives job assignment from the orchestrator, invokes odyssey-core over gRPC to actually execute the work, and streams results/heartbeats back out. All internal calls to odyssey-core go through this gRPC interface — not through a CLI.
 - **CLI** (`odyssey-cli`) — a thin gRPC client for humans, wrapping odyssey-core for local, one-off runs. Deprioritized: not a near-term build target, and not on the critical path for hosted execution. Ships later, once the Go rewrite and hosted platform are stable.
 
@@ -146,7 +146,7 @@ flowchart TD
 
 ### Result model
 
-- `StatusError` (infrastructure failure: setup/teardown broke) is distinct from `StatusFailed` (the step ran and exited nonzero) and `StatusPending`.
+- `StatusErrored` (infrastructure failure: setup/teardown broke) is distinct from `StatusFailed` (the step ran and exited nonzero) and `StatusPending`.
 - `JobResult` carries a `SetupErr` field for infra failures specifically.
 - Aggregation uses a `worstStatus` helper with precedence Error > Failed > Pending > Passed.
 
@@ -170,10 +170,10 @@ Single job only: given a flagged failure (new failure, or high flakiness score) 
 - The moat is the intelligence layer, not execution — avoid spending design effort on infra plumbing that commoditizes the product.
 - Docker already handles local image caching; caching container **instances** is unnecessary.
 - Shell state doesn't persist across `exec_run` calls; only filesystem state does.
-- `StatusError` vs `StatusFailed` is an important semantic distinction for result aggregation.
+- `StatusErrored` vs `StatusFailed` is an important semantic distinction for result aggregation.
 - Stderr is not reliably "the error"; stdout/stderr must be kept separate.
 - Deferred cleanup must use an independent context to avoid silent container leaks on timeout.
-- Schema fields should be minimal and orthogonal; validate contradictory combinations at parse time (Pydantic cross-field validators, or Go equivalent).
+- Schema fields should be minimal and orthogonal; validate contradictory combinations at parse time (enforced in `config.Validate`, which aggregates every violation).
 - Deferring `services`, network features, CVE scanning, and CLI is the right call to maintain focus on the intelligence layer.
 - Internal calls to odyssey-core go through its gRPC interface — not through a CLI, which is a human-facing convenience layered on top, built later.
 - The orchestrator is the gRPC **client**; the agent stays a passive, request/response executor (decided in gh-16). Agent-initiated registration/polling models were considered and rejected — nothing in the architecture needs an agent that dials out. Lifecycle concerns (heartbeats, retries, result streaming) belong to the orchestrator/event-bus side, tracked in gh-17 and gh-35.
@@ -206,13 +206,13 @@ Single job only: given a flagged failure (new failure, or high flakiness score) 
 
 ## Tech stack
 
-- **Language**: Go (rewrite, 1.21+, uses `context.WithoutCancel`); Python + `uv` workspaces (original prototype).
-- **Containerization**: Docker SDK — `exec_run` / `sleep infinity` model, `put_archive` for file copying.
+- **Language**: Go (rewrite, 1.26+, uses `context.WithoutCancel`); Python + `uv` workspaces (original prototype).
+- **Containerization**: Docker SDK — long-running `tail -f /dev/null` container per job, `exec` for steps, `put_archive` for file copying.
 - **Python stack** (prototype phase): Pydantic, Typer, Loguru, Rich, pytest, Ruff. 57 tests, 100% coverage on unit-testable modules.
 - **Config format**: TOML (`.odyssey/pipeline.toml`, `.odyssey/env.toml`).
 - **Inter-service interface**: gRPC (odyssey-core's execution API).
-- **Event bus candidates**: Redis Streams, Kafka, NATS JetStream.
-- **Registry tooling candidates**: `registry:2`, Zot, Harbor, backed by S3/GCS/R2.
+- **Event bus**: Redis Streams (ADR 0001); evaluated against Kafka and NATS JetStream.
+- **Registry tooling**: `registry:2`, Zot, Harbor, backed by S3/GCS/R2 — decision open.
 - **Validation target**: a separate FastAPI bookstore API repo, used for real-world pipeline validation.
 
 ## Open questions

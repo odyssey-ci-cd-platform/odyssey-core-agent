@@ -6,7 +6,7 @@ import (
 
 // TestProjectPathAllowed asserts project paths are confined under the
 // configured root; an empty root means unrestricted (local development)
-// (AUD-005).
+// (AUD-005, gh-74).
 func TestProjectPathAllowed(t *testing.T) {
 	tests := []struct {
 		name    string

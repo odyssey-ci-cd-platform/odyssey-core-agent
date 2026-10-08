@@ -52,6 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Stages run fail-fast: the first Failed or Errored stage ends the run and later stages are skipped; the orchestrator no longer returns an always-nil error (gh-82).
 - The server owns one Docker runner for its lifetime and closes it on shutdown; a missing runner is a configuration error instead of a per-request client (gh-75).
 - Consumer: read errors back off instead of hot-looping, recovery walks every pending entry instead of the first 64, and entries that can never parse dead-letter immediately (gh-76).
+- Docker integration tests ping the daemon and skip cleanly when it is down; tests locking in the old exit-code behavior were rewritten (gh-77).
 ### Security
 - The gRPC server binds localhost by default, honors a verbatim `ODYSSEY_ADDR`, and confines `project_path` under `ODYSSEY_PROJECT_ROOT` when set (gh-74).
 

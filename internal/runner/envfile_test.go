@@ -1,3 +1,6 @@
+// Internal test package (exception to the external-package convention):
+// the env-file parsing and merge rules under test are unexported seam
+// internals with no exported surface to drive them (AUD-017 disposition).
 package runner
 
 import (

@@ -48,6 +48,13 @@ func (r *DockerRunner) Close() error {
 	return r.client.Close()
 }
 
+// Ping verifies the Docker daemon is reachable. Tests use it to skip
+// cleanly instead of failing or hanging when the daemon is down (AUD-017).
+func (r *DockerRunner) Ping(ctx context.Context) error {
+	_, err := r.client.Ping(ctx, client.PingOptions{})
+	return err
+}
+
 // loggerFromCtx returns the logger attached to ctx, falling back to the
 // runner's own logger when none is present.
 func (r *DockerRunner) loggerFromCtx(ctx context.Context) *slog.Logger {

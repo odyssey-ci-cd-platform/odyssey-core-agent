@@ -105,7 +105,9 @@ func TestNewDockerRunner(t *testing.T) {
 }
 
 // requireDocker returns a DockerRunner, skipping the test if Docker
-// is not available.
+// is not available. A successful client constructor is not enough — the
+// daemon itself is pinged, so a stopped daemon skips instead of failing
+// or hanging (AUD-017).
 func requireDocker(t *testing.T) *runner.DockerRunner {
 	t.Helper()
 	if testing.Short() {
@@ -114,6 +116,12 @@ func requireDocker(t *testing.T) *runner.DockerRunner {
 	r, err := runner.NewDockerRunner(nil)
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)
+	}
+	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := r.Ping(pingCtx); err != nil {
+		r.Close()
+		t.Skipf("Docker daemon not reachable: %v", err)
 	}
 	return r
 }
@@ -225,12 +233,28 @@ func TestDockerRunnerCancelledStepReportsCancellation(t *testing.T) {
 		Steps: []domain.Step{{Name: "hang", Run: "sleep 10"}},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	sink := &recordingSink{}
 	go func() {
-		time.Sleep(2500 * time.Millisecond)
-		cancel()
+		// Cancel as soon as the step is actually running — a fixed delay
+		// races container startup under load (AUD-011).
+		deadline := time.After(30 * time.Second)
+		for {
+			for _, e := range sink.recorded() {
+				if e.Type == domain.EventStepStarted {
+					cancel()
+					return
+				}
+			}
+			select {
+			case <-deadline:
+				cancel()
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
 	}()
 
-	result, err := r.Run(ctx, job, dir, nil)
+	result, err := r.Run(ctx, job, dir, sink)
 	if err == nil {
 		t.Fatal("Run() expected an error when the run is cancelled, got nil")
 	}

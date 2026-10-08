@@ -1,3 +1,7 @@
+// Internal test package (exception to the external-package convention):
+// the proto mapping functions under test are unexported by design (the
+// mapping is a server-internal concern), so the assertions must live
+// inside the package (AUD-017 disposition).
 package server
 
 import (

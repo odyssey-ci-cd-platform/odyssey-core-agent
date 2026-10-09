@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"bitbucket.org/odyssey-ci/odyssey-core-agent/internal/common"
@@ -310,15 +311,24 @@ func (r *DockerRunner) emitStep(ctx context.Context, events StepSink, event doma
 }
 
 // stepFinishedEvent builds the finished envelope for an appended step
-// result. The payload carries the status only — never stdout/stderr
-// content (ADR 0001 keeps output off the bus).
+// result. The payload carries the status, exit code, and duration the
+// results recorder needs for its steps table — never stdout/stderr
+// content (ADR 0001 keeps output off the bus). A step whose process never
+// produced an exit code omits the key, so the recorded column stays NULL.
 func stepFinishedEvent(jobName string, result domain.StepResult) domain.Event {
+	payload := map[string]string{
+		"status":      result.Status().String(),
+		"duration_ms": strconv.FormatInt(result.Duration.Milliseconds(), 10),
+	}
+	if result.ExitCode != domain.ExitNone {
+		payload["exit_code"] = strconv.Itoa(int(result.ExitCode))
+	}
 	return domain.Event{
 		Type:       domain.EventStepFinished,
 		OccurredAt: time.Now(),
 		Job:        jobName,
 		Step:       result.StepName,
-		Payload:    map[string]string{"status": result.Status().String()},
+		Payload:    payload,
 	}
 }
 

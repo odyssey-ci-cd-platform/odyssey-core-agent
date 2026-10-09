@@ -139,7 +139,7 @@ func (o *Orchestrator) runStage(ctx context.Context, stage domain.Stage, pipelin
 			jobLogger := stageLogger.With("job", job.Name)
 			jobCtx := common.ContextWithLogger(ctx, jobLogger)
 
-			o.emit(jobCtx, domain.Event{Type: domain.EventJobStarted, OccurredAt: time.Now(), RunID: runID, Pipeline: pipelineName, Job: job.Name})
+			o.emit(jobCtx, domain.Event{Type: domain.EventJobStarted, OccurredAt: time.Now(), RunID: runID, Pipeline: pipelineName, Job: job.Name, Payload: map[string]string{"stage": stage.Name}})
 			jobResult, err := o.runner.Run(jobCtx, job, projectPath, o.stepSink(pipelineName, runID))
 			// The finished event is the record that the job ended; it must
 			// not die with a cancelled context (AUD-012).

@@ -226,6 +226,9 @@ func TestOrchestratorEmitsLifecycleEvents(t *testing.T) {
 			switch e.Type {
 			case domain.EventJobStarted:
 				started = i
+				if got := e.Payload["stage"]; got != "build" {
+					t.Errorf("job %s started payload stage = %q, want %q (gh-85: the recorder keys the jobs table by stage)", job, got, "build")
+				}
 			case domain.EventJobFinished:
 				finished = i
 				if got := e.Payload["status"]; got != status.String() {

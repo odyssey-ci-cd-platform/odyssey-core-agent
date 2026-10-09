@@ -54,11 +54,11 @@ Verify: no mid-sentence hard-wrap findings in changed files.
 
 1. Run `scripts/e2e-event-bus.sh`.
 
-The script spawns its own Redis (docker, `redis:7-alpine`), starts the server with `ODYSSEY_REDIS_ADDR` pointed at it, joins a live `events-logger` subscriber, triggers one pipeline run through the real gRPC client, and asserts the `odyssey:events` stream holds exactly the six lifecycle events (pipeline, job, and step started/finished) tagged with the fixture pipeline and that the subscriber handled and acked all six.
+The script spawns its own Redis (docker, `redis:7-alpine`), starts the server with `ODYSSEY_REDIS_ADDR` pointed at it and the results database at a temp path, joins a live `events-logger` subscriber, triggers one pipeline run through the real gRPC client, and asserts the `odyssey:events` stream holds exactly the six lifecycle events (pipeline, job, and step started/finished) tagged with the fixture pipeline, that the subscriber handled and acked all six, and that the recorder landed one run/job/step row in the results database with the right statuses, stage, exit code, and duration (needs python3 with stdlib sqlite3).
 
-Verify: `PASS: 6 lifecycle events for e2e-smoke on odyssey:events; live subscriber handled and acked all 6` and exit code 0; the script cleans up its container, binaries, and fixture on both pass and fail.
+Verify: `PASS: 6 lifecycle events for e2e-smoke on odyssey:events; live subscriber handled and acked all 6; run recorded in .e2e-results.db` and exit code 0; the script cleans up its container, binaries, fixture, and database on both pass and fail.
 
-Use it when changing the bus, orchestrator emission, or server wiring — `make check` covers the seams with miniredis, not a live Redis.
+Use it when changing the bus, orchestrator emission, the recorder, or server wiring — `make check` covers the seams with miniredis, not a live Redis or a real results file.
 
 ## 2. Maintenance tasks
 

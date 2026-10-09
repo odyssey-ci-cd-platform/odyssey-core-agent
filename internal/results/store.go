@@ -21,6 +21,7 @@ import (
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
+
 // Store is the embedded SQLite results database: WAL, migrated on open,
 // written only through Record.
 type Store struct {

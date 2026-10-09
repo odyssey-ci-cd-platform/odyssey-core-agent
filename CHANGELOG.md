@@ -24,6 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- Results recording: with the bus enabled, the server runs an in-process `results-recorder` consumer — the only writer of the embedded SQLite results database (`ODYSSEY_RESULTS_DB`, default `odyssey-results.db`), WAL mode, migrations applied on startup, idempotent under at-least-once redelivery; events missing run identity dead-letter (gh-85).
+- `internal/results`: SQLite store behind goose embedded migrations with normalized `runs`/`jobs`/`steps` and a JSON payload column reserved on `steps` (gh-85).
 - Lifecycle events carry a run ID and finished events survive run cancellation (gh-67).
 - Repository audit process (`audit/PROCESS.md`) and the first recorded audit, evaluated at 7d7be54 (gh-60).
 - gRPC contract: step results carry stdout, stderr, error text, and duration separately; job results carry error and duration; stage, pipeline, and response carry durations (gh-66).
@@ -38,6 +40,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - CI workflow running `make check` on every PR and push to main; branch protection on main requires the `check` status and pull requests.
 
 ### Changed
+- Step finished payloads add `exit_code` and `duration_ms`, and job started payloads add `stage`, so the recorder can fill its schema; stdout/stderr content stays off the bus (gh-85).
+- The event bus E2E smoke also asserts the run lands in the results database, and passes a localhost `ODYSSEY_ADDR` — a bare port stopped parsing when gh-74 made the variable verbatim (gh-85).
 - Pipeline TOML files with unknown keys are rejected at load, naming the file and keys; the undocumented job `name` key is gone from the example and fixtures (gh-68).
 - A declared stage with no jobs now fails validation instead of aggregating to Pending forever (gh-69).
 - Jobs within a stage are ordered deterministically by job key (gh-70).

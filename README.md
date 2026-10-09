@@ -136,6 +136,7 @@ flowchart TD
 - `ODYSSEY_ADDR` — the address the gRPC server binds, used verbatim (`:50051`, `host:50051`). Unset, the server binds `localhost:50051`, so an unconfigured server is not reachable from the network (AUD-005).
 - `ODYSSEY_PROJECT_ROOT` — when set, every request's `project_path` must resolve under this directory; requests outside it are rejected. Unset, paths are unrestricted, which is the local-development posture (AUD-005).
 - `ODYSSEY_REDIS_ADDR` — enables the event bus when set; without it the server runs with the bus disabled (ADR 0001).
+- `ODYSSEY_RESULTS_DB` — the results database file, used when the bus is enabled; the server's in-process recorder is the only writer (ADR 0002). Unset, `odyssey-results.db` in the working directory. An unopenable database fails startup: a server that cannot record history must not pretend it will.
 
 ### Execution model (odyssey-core)
 
